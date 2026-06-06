@@ -4,7 +4,7 @@ from __future__ import annotations
 FACTION_COLORS = {
     "太阳系": "#f4f2de",
     "无限未来": "#ff6575",
-    "人类群星联合": "#68a8ff",
+    "人类群星": "#68a8ff",
     "明日晨曦": "#ffc857",
     "S&F": "#b28cff",
     "美丽花园巨企": "#78dd8a",

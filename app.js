@@ -38,9 +38,10 @@ const CAMERA_HOME = new THREE.Vector3(78, 58, 84);
 const factionColors = {
   "太阳系": "#f4f2de",
   "无限未来": "#ff6575",
-  "人类群星联合": "#68a8ff",
+  "人类群星": "#68a8ff",
   "明日晨曦": "#ffc857",
   "S&F": "#b28cff",
+  "美丽花园巨企": "#78dd8a",
   "半人马联合重工": "#e68a4e",
   "星蓝元素": "#2bd7ff",
   "巴纳德星际动力": "#b9bdc5",
@@ -825,9 +826,10 @@ function showDetails(star) {
     detailRow("天文", "行星数", `${star.planetCount}（确认 ${star.confirmedPlanets} / 候选 ${star.candidatePlanets}）`),
     detailRow("势力", "势力类型", star.factionType),
     detailRow("天文", "行星统计", formatMarkdown(star.planets)),
-    detailRow("现实", "现实口径", formatMarkdown(star.reality)),
+    ...(star.reality ? [detailRow("现实", "现实口径", formatMarkdown(star.reality))] : []),
     detailRow("设定", "2350设定", formatMarkdown(star.setting))
   ];
+  if (star.notes) rows.push(detailRow("势力", "势力备注", formatMarkdown(star.notes)));
   if (star.age) rows.push(detailRow("天文", "恒星年龄", formatMarkdown(star.age)));
   if (star.lifespan) rows.push(detailRow("天文", "恒星寿命", formatMarkdown(star.lifespan)));
   if (star.disasters) rows.push(detailRow("天文", "灾害特征", formatMarkdown(star.disasters)));
