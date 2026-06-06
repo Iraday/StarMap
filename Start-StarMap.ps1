@@ -23,7 +23,22 @@ function Test-PortOpen([int]$Candidate) {
   return $null -eq $conn
 }
 
-$Python = Find-Python
+$SystemPython = Find-Python
+$VenvDir = ".venv"
+
+if (-not (Test-Path "$VenvDir\Scripts\python.exe")) {
+    Write-Host "Virtual environment not found. Setting it up..." -ForegroundColor Cyan
+    & $SystemPython -m venv $VenvDir
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to create virtual environment."
+    }
+}
+
+$Python = "$Root\$VenvDir\Scripts\python.exe"
+
+if (Test-Path "requirements.txt") {
+    & $Python -m pip install -r requirements.txt
+}
 
 while (-not (Test-PortOpen $Port)) {
   $Port += 1

@@ -737,22 +737,45 @@ async function apiJson(path) {
 
 function makeTextSprite(text, color = "#edf3f8", size = 34, align = "center") {
   const pad = 18;
+  const parts = String(text).split(/([*_].*?[*_])/g);
+  const tokens = [];
+  parts.forEach((part) => {
+    if ((part.startsWith("*") && part.endsWith("*")) || (part.startsWith("_") && part.endsWith("_"))) {
+      if (part.length > 2) tokens.push({ text: part.slice(1, -1), italic: true });
+    } else if (part.length > 0) {
+      tokens.push({ text: part, italic: false });
+    }
+  });
+
   const canvasText = document.createElement("canvas");
   const context = canvasText.getContext("2d");
-  context.font = `700 ${size}px Inter, Segoe UI, sans-serif`;
-  const metrics = context.measureText(text);
-  const width = Math.ceil(metrics.width + pad * 2);
+  
+  let totalWidth = 0;
+  tokens.forEach((token) => {
+    context.font = `${token.italic ? "italic " : ""}700 ${size}px Inter, Segoe UI, sans-serif`;
+    totalWidth += context.measureText(token.text).width;
+  });
+
+  const width = Math.ceil(totalWidth + pad * 2);
   const height = Math.ceil(size + pad * 2);
   canvasText.width = width;
   canvasText.height = height;
-  context.font = `700 ${size}px Inter, Segoe UI, sans-serif`;
-  context.textAlign = align;
+
   context.textBaseline = "middle";
   context.fillStyle = "rgba(7, 9, 13, 0.58)";
   roundRect(context, 1, 1, width - 2, height - 2, 12);
   context.fill();
+
   context.fillStyle = color;
-  context.fillText(text, align === "left" ? pad : width / 2, height / 2);
+  let currentX = align === "left" ? pad : (width - totalWidth) / 2;
+  const currentY = height / 2;
+
+  tokens.forEach((token) => {
+    context.font = `${token.italic ? "italic " : ""}700 ${size}px Inter, Segoe UI, sans-serif`;
+    context.fillText(token.text, currentX, currentY);
+    currentX += context.measureText(token.text).width;
+  });
+
   const texture = new THREE.CanvasTexture(canvasText);
   texture.colorSpace = THREE.SRGBColorSpace;
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false }));
@@ -1271,7 +1294,7 @@ async function openSystemView(value = selectedStar?.id) {
       return;
     }
     const angle = index * 1.78 + (star.id.length % 7);
-    const radius = bodyRadius(body.bodyType, body.habitable);
+    const radius = body.bodyType === "star" ? 0.08 : bodyRadius(body.bodyType, body.habitable);
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(radius, 24, 16),
       new THREE.MeshBasicMaterial({ color: bodyColor(body.bodyType), transparent: true, opacity: body.bodyType === "cloud" ? 0.45 : 1 })
@@ -1307,7 +1330,11 @@ async function openSystemView(value = selectedStar?.id) {
   }
 
   controls.target.copy(center);
-  camera.position.set(center.x + 9.5, center.y + 7.2, center.z + 9.5);
+  if (payload.bodies.length <= 1) {
+    camera.position.set(center.x + 2.5, center.y + 1.8, center.z + 2.5);
+  } else {
+    camera.position.set(center.x + 9.5, center.y + 7.2, center.z + 9.5);
+  }
   showDetails(star);
   writeAgentOutput({ action: "openSystem", id: star.id, bodies: payload.bodies.length });
   return payload;
