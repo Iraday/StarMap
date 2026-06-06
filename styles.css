@@ -323,14 +323,37 @@ button[aria-pressed="true"] {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px 10px;
-  max-height: 86px;
-  margin-top: 9px;
+  max-height: 120px;
+  margin-top: 6px;
   overflow: auto;
   padding: 8px;
   border: 1px solid rgba(223, 231, 241, 0.1);
   border-radius: 6px;
   background: rgba(6, 9, 13, 0.45);
   font-size: 12px;
+}
+
+.detail-field-section {
+  margin-top: 16px;
+}
+
+.detail-field-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.detail-field-header span {
+  flex: 1;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.detail-field-header button {
+  min-height: 26px;
+  padding: 2px 10px;
+  font-size: 11px;
 }
 
 .field-controls label {

@@ -52,7 +52,7 @@ const factionColors = {
   "南爪边境开发集团": "#d070ff",
   "外环水蛇-北落师门采掘同盟": "#b9b86b",
   "许可/争议区": "#93a0ad",
-  "自然天体/科研区": "#8ca6c8",
+  "无/无所属": "#8ca6c8",
   "白矮星科研封存区": "#dfe8ff"
 };
 
@@ -635,7 +635,7 @@ controls.enableDamping = true;
 controls.dampingFactor = 0.06;
 controls.rotateSpeed = 0.65;
 controls.zoomSpeed = 0.9;
-controls.minDistance = 14;
+controls.minDistance = 0.5;
 controls.maxDistance = 180;
 controls.target.set(0, 0, 0);
 
@@ -658,47 +658,52 @@ let selectedBody = null;
 let lastMeasureStar = null;
 let activeFaction = "all";
 let activeSystemScaleRoot = null;
+let inSystemView = false;
+let savedCameraPos = null;
+let savedCameraTarget = null;
 let currentYear = 2350;
 let lastFrameTime = performance.now();
 const pressedKeys = new Set();
 let currentDetailTitleHtml = "";
 let currentDetailRows = [];
 let renderingFieldControls = false;
-const detailFieldVisibility = new Map(
-  JSON.parse(localStorage.getItem("starmap-detail-fields") || "[]")
+const detailGroupVisibility = new Map(
+  JSON.parse(localStorage.getItem("starmap-detail-groups") || "[]")
 );
 
-function saveDetailFieldVisibility() {
-  localStorage.setItem("starmap-detail-fields", JSON.stringify(Array.from(detailFieldVisibility.entries())));
+function saveDetailGroupVisibility() {
+  localStorage.setItem("starmap-detail-groups", JSON.stringify(Array.from(detailGroupVisibility.entries())));
 }
 
 function detailRow(group, key, value) {
   return { group, key, value };
 }
 
-function fieldVisible(key) {
-  return !detailFieldVisibility.has(key) || detailFieldVisibility.get(key);
+function groupVisible(group) {
+  return !detailGroupVisibility.has(group) || detailGroupVisibility.get(group);
 }
 
-function setAllDetailFields(rows, visible) {
-  rows.forEach((row) => detailFieldVisibility.set(row.key, visible));
-  saveDetailFieldVisibility();
+function setAllDetailGroups(visible) {
+  const groups = Array.from(new Set(currentDetailRows.map((row) => row.group)));
+  groups.forEach((group) => detailGroupVisibility.set(group, visible));
+  saveDetailGroupVisibility();
+  renderGroupControls();
   renderDetailPanel(currentDetailTitleHtml, currentDetailRows);
 }
 
-function renderFieldControls(rows) {
+function renderGroupControls() {
   if (!detailFieldControls) return;
   renderingFieldControls = true;
-  const keys = Array.from(new Set(rows.map((row) => row.key)));
-  detailFieldControls.innerHTML = keys.map((key) => {
-    const checked = fieldVisible(key) ? " checked" : "";
-    return `<label><input type="checkbox" value="${key}"${checked} /> ${key}</label>`;
+  const groups = Array.from(new Set(currentDetailRows.map((row) => row.group)));
+  detailFieldControls.innerHTML = groups.map((group) => {
+    const checked = groupVisible(group) ? " checked" : "";
+    return `<label><input type="checkbox" value="${group}"${checked} /> ${group}</label>`;
   }).join("");
   detailFieldControls.querySelectorAll("input[type='checkbox']").forEach((input) => {
     input.addEventListener("change", () => {
       if (renderingFieldControls) return;
-      detailFieldVisibility.set(input.value, input.checked);
-      saveDetailFieldVisibility();
+      detailGroupVisibility.set(input.value, input.checked);
+      saveDetailGroupVisibility();
       renderDetailPanel(currentDetailTitleHtml, currentDetailRows);
     });
   });
@@ -726,8 +731,8 @@ function renderDetailPanel(titleHtml, rows) {
   currentDetailTitleHtml = titleHtml;
   currentDetailRows = rows;
   detailTitle.innerHTML = titleHtml;
-  renderFieldControls(rows);
-  const visibleRows = rows.filter((row) => fieldVisible(row.key));
+  renderGroupControls();
+  const visibleRows = rows.filter((row) => groupVisible(row.group));
   const groups = Array.from(new Set(visibleRows.map((row) => row.group)));
   renderDetailNav(groups);
   if (!visibleRows.length) {
@@ -1387,6 +1392,20 @@ function clearSystemView() {
   systemLayer.children.forEach((child) => disposeObject(child));
   systemLayer.clear();
   activeSystemScaleRoot = null;
+  inSystemView = false;
+}
+
+function exitSystemView() {
+  if (!inSystemView) return;
+  clearSystemView();
+  if (savedCameraPos && savedCameraTarget) {
+    camera.position.copy(savedCameraPos);
+    controls.target.copy(savedCameraTarget);
+  } else {
+    camera.position.copy(CAMERA_HOME);
+    controls.target.set(0, 0, 0);
+  }
+  writeAgentOutput({ action: "exitSystem" });
 }
 
 function makeOrbit(radius, color = 0x8ca6c8) {
@@ -1457,6 +1476,9 @@ async function openSystemView(value = selectedStar?.id) {
       ]
     };
   }
+  // Save camera state before entering system view
+  savedCameraPos = camera.position.clone();
+  savedCameraTarget = controls.target.clone();
   clearSystemView();
   const center = toWorld(star.xyz);
 
@@ -1470,6 +1492,11 @@ async function openSystemView(value = selectedStar?.id) {
   scaleRoot.position.copy(center);
   systemLayer.add(scaleRoot);
   activeSystemScaleRoot = scaleRoot;
+  inSystemView = true;
+
+  // Scale entire system to roughly match the star dot size (~0.05 of unscaled)
+  const systemScale = 0.045;
+  scaleRoot.scale.setScalar(systemScale);
 
   if (star.hz_inner && star.hz_outer && star.hz_outer > star.hz_inner) {
     const inner = scaledOrbitAu(star.hz_inner);
@@ -1528,12 +1555,10 @@ async function openSystemView(value = selectedStar?.id) {
     scaleRoot.add(label);
   });
 
+  // Zoom camera very close to the system center
   controls.target.copy(center);
-  if (payload.bodies.length <= 1) {
-    camera.position.set(center.x + 2.5, center.y + 1.8, center.z + 2.5);
-  } else {
-    camera.position.set(center.x + 9.5, center.y + 7.2, center.z + 9.5);
-  }
+  const zoomDist = 1.2;
+  camera.position.set(center.x + zoomDist, center.y + zoomDist * 0.7, center.z + zoomDist);
   showDetails(star);
   writeAgentOutput({ action: "openSystem", id: star.id, bodies: payload.bodies.length });
   return payload;
@@ -1641,8 +1666,14 @@ function setupInteraction() {
     }
     const hits = raycaster.intersectObjects(starMeshes.filter((mesh) => mesh.visible), false);
     if (hits.length) {
+      const clickedStar = hits[0].object.userData.star;
+      // If double-clicking the same star while in system view, exit system view
+      if (inSystemView && selectedStar?.id === clickedStar.id) {
+        exitSystemView();
+        return;
+      }
       try {
-        await openSystemView(hits[0].object.userData.star);
+        await openSystemView(clickedStar);
       } catch (error) {
         writeAgentOutput(error.message);
       }
@@ -1821,8 +1852,8 @@ function bindUi() {
   minPlanets.addEventListener("input", updateVisibility);
   yearSlider.addEventListener("input", updateVisibility);
   starScale.addEventListener("input", updateScale);
-  detailSelectAll?.addEventListener("click", () => setAllDetailFields(currentDetailRows, true));
-  detailSelectNone?.addEventListener("click", () => setAllDetailFields(currentDetailRows, false));
+  detailSelectAll?.addEventListener("click", () => setAllDetailGroups(true));
+  detailSelectNone?.addEventListener("click", () => setAllDetailGroups(false));
 
   document.querySelector("#resetView").addEventListener("click", () => {
     controls.target.set(0, 0, 0);
@@ -1887,6 +1918,11 @@ function bindUi() {
     const key = event.key.toLowerCase();
     const active = document.activeElement;
     if (active && ["INPUT", "SELECT", "TEXTAREA"].includes(active.tagName)) return;
+    if (event.key === "Escape" && inSystemView) {
+      exitSystemView();
+      event.preventDefault();
+      return;
+    }
     if (["w", "a", "s", "d", "q", "e"].includes(key)) {
       pressedKeys.add(key);
       event.preventDefault();

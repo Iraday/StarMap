@@ -86,6 +86,15 @@
           <input id="starScale" type="range" min="0.7" max="1.9" value="1.1" step="0.05" />
         </div>
 
+        <div class="detail-field-section" aria-label="详情展示选项">
+          <div class="detail-field-header">
+            <span>详情展示</span>
+            <button id="detailSelectAll" type="button">全选</button>
+            <button id="detailSelectNone" type="button">全不选</button>
+          </div>
+          <div id="detailFieldControls" class="field-controls" aria-label="分类显示选择"></div>
+        </div>
+
         <div class="agent-tools" aria-label="Agent 接口快捷操作">
           <label for="agentAction">Agent 接口</label>
           <select id="agentAction">
@@ -121,11 +130,6 @@
           <h2 id="detailTitle">太阳 / Sol</h2>
         </div>
         <nav id="detailTabs" class="detail-tabs" aria-label="详情横向导航"></nav>
-        <div class="detail-tools" aria-label="详情字段控制">
-          <button id="detailSelectAll" type="button">全选</button>
-          <button id="detailSelectNone" type="button">全不选</button>
-        </div>
-        <div id="detailFieldControls" class="field-controls" aria-label="字段显示选择"></div>
         <div class="detail-body">
           <nav id="detailSideNav" class="detail-side-nav" aria-label="详情纵向导航"></nav>
           <div id="detailList" class="detail-list"></div>

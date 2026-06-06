@@ -202,7 +202,7 @@ def infer_planet_count(star: dict) -> int:
 def default_faction_type(star: dict) -> str:
     faction = str(star.get("faction", ""))
     status = str(star.get("status", ""))
-    if faction == "自然天体/科研区":
+    if faction == "无/无所属":
         return "自然/科研"
     if status == "minor":
         return "中立/科研"
@@ -257,7 +257,7 @@ def normalize_star_seed(raw: dict) -> dict:
     star.setdefault("disasters", "")
     star.setdefault("hz_inner", 0)
     star.setdefault("hz_outer", 0)
-    default_rule_time = 0.04 if star.get("faction") == "自然天体/科研区" else 0.12
+    default_rule_time = 0.04 if star.get("faction") == "无/无所属" else 0.12
     star.setdefault("rule_info_time", default_rule_time)
     star.setdefault("info_speed", 1)
     star.setdefault("ftl_speed", 1)
