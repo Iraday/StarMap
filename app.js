@@ -41,7 +41,6 @@ const factionColors = {
   "人类群星联合": "#68a8ff",
   "明日晨曦": "#ffc857",
   "S&F": "#b28cff",
-  "美丽花园巨企": "#78dd8a",
   "半人马联合重工": "#e68a4e",
   "星蓝元素": "#2bd7ff",
   "巴纳德星际动力": "#b9bdc5",
@@ -50,7 +49,6 @@ const factionColors = {
   "Ross 128生态城邦": "#a3efb6",
   "远岭联营": "#e6b06f",
   "南爪边境开发集团": "#d070ff",
-  "天苑四造船联合体": "#ff9d42",
   "格利泽远星物流网络": "#c8b87a",
   "大衮远洋探索集团": "#5ba8c4",
   "安第斯大气工程公司": "#7ecba1",
@@ -493,6 +491,7 @@ function addStarfield() {
 function getStarRadius(star) {
   if (star.objectType === "diffuse_cloud") return 1.15;
   if (star.objectType === "brown_dwarf" || star.objectType === "substellar_object") return 0.24;
+  if (star.objectType === "rogue_planet") return 0.18;
   if (star.id === "sol") return 0.82;
   const spec = String(star.spectralClass || "").toUpperCase();
   let size = baseRadius;
@@ -755,8 +754,11 @@ function updateVisibility() {
   stars.forEach((star) => {
     let visible = faction === "all" || star.faction === faction || star.id === "sol";
     if (text) {
-      visible = visible && [star.id, star.name, star.short, star.faction, star.factionType, star.className, star.planets, star.setting]
+      // Search highlights the matching star but does NOT hide other stars —
+      // it only suppresses stars that fail ALL other (non-search) filters.
+      const matches = [star.id, star.name, star.short, star.faction, star.factionType, star.className, star.planets, star.setting]
         .some((value) => normalizeSearch(value).includes(text));
+      if (!matches) visible = false;
     }
     if (objectType !== "all") visible = visible && star.objectType === objectType;
     if (spectral !== "all") visible = visible && String(star.spectralClass).includes(spectral);
