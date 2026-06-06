@@ -573,8 +573,8 @@ const fallbackStars = [
   },
   {
     id: "li-hartman",
-    name: "李-哈特曼 / Li-Hartman",
-    short: "Li-Hartman",
+    name: "*李-哈特曼* / *Li-Hartman*",
+    short: "*Li-Hartman*",
     octant: "---",
     order: 6,
     distance: 22.3,
