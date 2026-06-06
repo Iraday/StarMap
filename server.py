@@ -71,6 +71,25 @@ def row_to_star(row: sqlite3.Row) -> dict:
     }
 
 
+def row_to_body(row: sqlite3.Row) -> dict:
+    return {
+        "id": row["id"],
+        "starId": row["star_id"],
+        "parentId": row["parent_id"],
+        "name": row["name"],
+        "bodyType": row["body_type"],
+        "orbitAu": row["orbit_au"],
+        "radiusLabel": row["radius_label"],
+        "massLabel": row["mass_label"],
+        "habitable": row["habitable"],
+        "summary": row["summary"],
+        "sortOrder": row["sort_order"],
+        "rule_info_time": row["rule_info_time"],
+        "info_speed": row["info_speed"],
+        "ftl_speed": row["ftl_speed"],
+    }
+
+
 def query_bool(params: dict[str, list[str]], key: str, default: bool = False) -> bool:
     raw = params.get(key, [str(int(default))])[0].casefold()
     return raw in {"1", "true", "yes", "y", "on"}
@@ -134,6 +153,14 @@ def zoom_payload(star: dict, camera_distance: float = 24.0) -> dict:
     }
 
 
+def apply_field_aliases(payload: dict, aliases: dict[str, str]) -> dict:
+    normalized = dict(payload)
+    for source, target in aliases.items():
+        if source in normalized and target not in normalized:
+            normalized[target] = normalized[source]
+    return normalized
+
+
 class StarMapHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT), **kwargs)
@@ -143,7 +170,7 @@ class StarMapHandler(SimpleHTTPRequestHandler):
 
     def end_headers(self) -> None:
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         super().end_headers()
 
@@ -159,6 +186,15 @@ class StarMapHandler(SimpleHTTPRequestHandler):
         super().do_GET()
 
     def do_POST(self) -> None:
+        self.handle_api_write()
+
+    def do_PUT(self) -> None:
+        self.handle_api_write()
+
+    def do_PATCH(self) -> None:
+        self.handle_api_write()
+
+    def handle_api_write(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path == "/api/stars":
             self.handle_add_star()
@@ -325,25 +361,7 @@ class StarMapHandler(SimpleHTTPRequestHandler):
             """,
             (star["id"],),
         ).fetchall()
-        bodies = [
-            {
-                "id": row["id"],
-                "starId": row["star_id"],
-                "parentId": row["parent_id"],
-                "name": row["name"],
-                "bodyType": row["body_type"],
-                "orbitAu": row["orbit_au"],
-                "radiusLabel": row["radius_label"],
-                "massLabel": row["mass_label"],
-                "habitable": row["habitable"],
-                "summary": row["summary"],
-                "sortOrder": row["sort_order"],
-                "rule_info_time": row["rule_info_time"],
-                "info_speed": row["info_speed"],
-                "ftl_speed": row["ftl_speed"],
-            }
-            for row in rows
-        ]
+        bodies = [row_to_body(row) for row in rows]
         return {"star": star, "bodies": bodies}
 
     def api_distance(self, con: sqlite3.Connection, params: dict[str, list[str]]) -> dict:
@@ -400,14 +418,33 @@ class StarMapHandler(SimpleHTTPRequestHandler):
 
     def handle_add_star(self) -> None:
         length = int(self.headers.get("Content-Length", "0"))
-        payload = json.loads(self.rfile.read(length).decode("utf-8"))
-        required = ["id", "name", "short", "octant", "distance", "arrival", "xyz", "faction"]
-        missing = [key for key in required if key not in payload]
-        if missing:
-            self.send_json({"error": "Missing required fields", "missing": missing}, HTTPStatus.BAD_REQUEST)
-            return
-        x, y, z = payload["xyz"]
+        payload = apply_field_aliases(
+            json.loads(self.rfile.read(length).decode("utf-8")),
+            {
+                "class_name": "className",
+                "object_type": "objectType",
+                "spectral_class": "spectralClass",
+                "star_count": "starCount",
+                "planet_count": "planetCount",
+                "confirmed_planets": "confirmedPlanets",
+                "candidate_planets": "candidatePlanets",
+                "faction_type": "factionType",
+                "display_after": "displayAfter",
+                "display_until": "displayUntil",
+                "control_start": "controlStart",
+                "control_end": "controlEnd",
+            },
+        )
         with connect() as con:
+            existing_row = con.execute("SELECT * FROM stars WHERE id = ?", (payload.get("id", ""),)).fetchone()
+            existing = row_to_star(existing_row) if existing_row else {}
+            record = {**existing, **payload}
+            required = ["id", "name", "short", "octant", "distance", "arrival", "xyz", "faction"]
+            missing = [key for key in required if key not in record]
+            if missing:
+                self.send_json({"error": "Missing required fields", "missing": missing}, HTTPStatus.BAD_REQUEST)
+                return
+            x, y, z = record["xyz"]
             con.execute(
                 """
                 INSERT OR REPLACE INTO stars (
@@ -422,63 +459,77 @@ class StarMapHandler(SimpleHTTPRequestHandler):
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    payload["id"],
-                    payload["name"],
-                    payload["short"],
-                    payload["octant"],
-                    int(payload.get("order", 0)),
-                    float(payload["distance"]),
-                    float(payload["arrival"]),
+                    record["id"],
+                    record["name"],
+                    record["short"],
+                    record["octant"],
+                    int(record.get("order", 0)),
+                    float(record["distance"]),
+                    float(record["arrival"]),
                     float(x),
                     float(y),
                     float(z),
-                    payload["faction"],
-                    str(payload.get("rank", "-")),
-                    payload.get("className", payload.get("class_name", "unknown")),
-                    payload.get("planets", ""),
-                    payload.get("reality", ""),
-                    payload.get("setting", ""),
-                    int(payload.get("habitable", 0)),
-                    payload.get("status", "core"),
-                    payload.get("objectType", payload.get("object_type", "star_system")),
-                    payload.get("spectralClass", payload.get("spectral_class", payload.get("className", "unknown"))),
-                    int(payload.get("starCount", payload.get("star_count", 1))),
-                    int(payload.get("planetCount", payload.get("planet_count", 0))),
-                    int(payload.get("confirmedPlanets", payload.get("confirmed_planets", payload.get("planetCount", 0)))),
-                    int(payload.get("candidatePlanets", payload.get("candidate_planets", 0))),
-                    payload.get("factionType", payload.get("faction_type", "未分类")),
-                    int(payload.get("displayAfter", payload.get("display_after", 0))),
-                    payload.get("displayUntil", payload.get("display_until")),
-                    int(payload.get("controlStart", payload.get("control_start", 2350))),
-                    payload.get("controlEnd", payload.get("control_end")),
-                    payload.get("notes", ""),
-                    payload.get("age", ""),
-                    payload.get("lifespan", ""),
-                    payload.get("disasters", ""),
-                    float(payload.get("hz_inner", 0)),
-                    float(payload.get("hz_outer", 0)),
-                    float(payload.get("rule_info_time", 0)),
-                    float(payload.get("info_speed", 0)),
-                    float(payload.get("ftl_speed", 1)),
+                    record["faction"],
+                    str(record.get("rank", "-")),
+                    record.get("className", record.get("class_name", "unknown")),
+                    record.get("planets", ""),
+                    record.get("reality", ""),
+                    record.get("setting", ""),
+                    int(record.get("habitable", 0)),
+                    record.get("status", "core"),
+                    record.get("objectType", record.get("object_type", "star_system")),
+                    record.get("spectralClass", record.get("spectral_class", record.get("className", "unknown"))),
+                    int(record.get("starCount", record.get("star_count", 1))),
+                    int(record.get("planetCount", record.get("planet_count", 0))),
+                    int(record.get("confirmedPlanets", record.get("confirmed_planets", record.get("planetCount", 0)))),
+                    int(record.get("candidatePlanets", record.get("candidate_planets", 0))),
+                    record.get("factionType", record.get("faction_type", "未分类")),
+                    int(record.get("displayAfter", record.get("display_after", 0))),
+                    record.get("displayUntil", record.get("display_until")),
+                    int(record.get("controlStart", record.get("control_start", 2350))),
+                    record.get("controlEnd", record.get("control_end")),
+                    record.get("notes", ""),
+                    record.get("age", ""),
+                    record.get("lifespan", ""),
+                    record.get("disasters", ""),
+                    float(record.get("hz_inner", 0) or 0),
+                    float(record.get("hz_outer", 0) or 0),
+                    float(record.get("rule_info_time", 0.12) or 0.12),
+                    float(record.get("info_speed", 1) or 1),
+                    float(record.get("ftl_speed", 1) or 1),
                 ),
             )
-            for value in (payload["id"], payload["name"], payload["short"]):
+            for value in (record["id"], record["name"], record["short"]):
                 con.execute(
                     "INSERT OR REPLACE INTO aliases(alias, star_id) VALUES (?, ?)",
-                    (normalize_alias(value), payload["id"]),
+                    (normalize_alias(value), record["id"]),
                 )
             con.commit()
-        self.send_json({"ok": True, "star": payload}, HTTPStatus.CREATED)
+        self.send_json({"ok": True, "star": record}, HTTPStatus.OK if existing else HTTPStatus.CREATED)
 
     def handle_add_body(self) -> None:
         length = int(self.headers.get("Content-Length", "0"))
-        payload = json.loads(self.rfile.read(length).decode("utf-8"))
-        required = ["id", "starId", "name", "bodyType"]
-        missing = [key for key in required if key not in payload]
-        if missing:
-            self.send_json({"error": "Missing required fields", "missing": missing}, HTTPStatus.BAD_REQUEST)
-            return
+        payload = apply_field_aliases(
+            json.loads(self.rfile.read(length).decode("utf-8")),
+            {
+                "star_id": "starId",
+                "parent_id": "parentId",
+                "body_type": "bodyType",
+                "orbit_au": "orbitAu",
+                "radius_label": "radiusLabel",
+                "mass_label": "massLabel",
+                "sort_order": "sortOrder",
+            },
+        )
         with connect() as con:
+            existing_row = con.execute("SELECT * FROM system_bodies WHERE id = ?", (payload.get("id", ""),)).fetchone()
+            existing = row_to_body(existing_row) if existing_row else {}
+            record = {**existing, **payload}
+            required = ["id", "starId", "name", "bodyType"]
+            missing = [key for key in required if key not in record]
+            if missing:
+                self.send_json({"error": "Missing required fields", "missing": missing}, HTTPStatus.BAD_REQUEST)
+                return
             con.execute(
                 """
                 INSERT OR REPLACE INTO system_bodies (
@@ -489,24 +540,24 @@ class StarMapHandler(SimpleHTTPRequestHandler):
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    payload["id"],
-                    payload["starId"],
-                    payload.get("parentId"),
-                    payload["name"],
-                    payload["bodyType"],
-                    float(payload.get("orbitAu", 0)),
-                    payload.get("radiusLabel", ""),
-                    payload.get("massLabel", ""),
-                    int(payload.get("habitable", 0)),
-                    payload.get("summary", ""),
-                    int(payload.get("sortOrder", 0)),
-                    float(payload.get("rule_info_time", 0)),
-                    float(payload.get("info_speed", 0)),
-                    float(payload.get("ftl_speed", 1)),
+                    record["id"],
+                    record["starId"],
+                    record.get("parentId"),
+                    record["name"],
+                    record["bodyType"],
+                    float(record.get("orbitAu", 0) or 0),
+                    record.get("radiusLabel", ""),
+                    record.get("massLabel", ""),
+                    int(record.get("habitable", 0)),
+                    record.get("summary", ""),
+                    int(record.get("sortOrder", 0)),
+                    float(record.get("rule_info_time", 0.05) or 0.05),
+                    float(record.get("info_speed", 1) or 1),
+                    float(record.get("ftl_speed", 1) or 1),
                 ),
             )
             con.commit()
-        self.send_json({"ok": True, "body": payload}, HTTPStatus.CREATED)
+        self.send_json({"ok": True, "body": record}, HTTPStatus.OK if existing else HTTPStatus.CREATED)
 
 
 def api_docs() -> dict:
@@ -522,8 +573,8 @@ def api_docs() -> dict:
             "GET /api/distance?from=gj1002&to=teegarden": "Calculate 3D distance in light years.",
             "GET /api/nearest?from=gj1002&limit=5": "List nearest systems from a given star.",
             "GET /api/zoom-target?star=gj1002": "Return target/camera coordinates for agent-driven zoom.",
-            "POST /api/stars": "Add or replace a star record. JSON body follows the app star schema.",
-            "POST /api/system-bodies": "Add or replace a clickable body inside a star system.",
+            "POST|PUT|PATCH /api/stars": "Add, replace, or partially update a star record. New records need the required star schema; existing records can send only id plus changed fields.",
+            "POST|PUT|PATCH /api/system-bodies": "Add, replace, or partially update a clickable body inside a star system. New records need id, starId, name, and bodyType; existing records can send only id plus changed fields.",
         },
         "agentBrowserApi": [
             "window.StarMapAgent.zoomToStar(idOrName)",
@@ -532,6 +583,10 @@ def api_docs() -> dict:
             "window.StarMapAgent.searchStars(textOrFilters)",
             "window.StarMapAgent.filterStars(filters)",
             "window.StarMapAgent.openSystem(idOrName)",
+            "window.StarMapAgent.addStar(payload)",
+            "window.StarMapAgent.updateStar({id, ...changedFields})",
+            "window.StarMapAgent.addBody(payload)",
+            "window.StarMapAgent.updateBody({id, ...changedFields})",
             "window.StarMapAgent.getState()",
         ],
     }

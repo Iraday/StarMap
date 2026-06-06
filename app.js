@@ -573,8 +573,8 @@ const fallbackStars = [
   },
   {
     id: "li-hartman",
-    name: "*李-哈特曼* / *Li-Hartman*",
-    short: "*Li-Hartman*",
+    name: "_李-哈特曼_ / _Li-Hartman_",
+    short: "_Li-Hartman_",
     octant: "---",
     order: 6,
     distance: 22.3,
@@ -582,10 +582,10 @@ const fallbackStars = [
     xyz: [-7.3, -11.8, -17.5],
     faction: "远岭联营",
     rank: 12,
-    className: "设定 K3V",
-    planets: "4 主级宜居/准宜居；原野、草原、釉海、匣；阙穹 76 卫星。",
-    reality: "架空锚点，置于 HD 20794 与 LTT 1445 A 邻近外缘。",
-    setting: "边境黄金压力锅，远岭联营经营权，母星方保留法理和黄金股。",
+    className: "_设定_ K3V",
+    planets: "4 主级宜居/准宜居；_原野星_、_草原星_、_釉海星_、_匣_；_阙穹_ 76 卫星。",
+    reality: "_架空锚点_，置于 HD 20794 与 LTT 1445 A 邻近外缘。",
+    setting: "_边境黄金压力锅_，远岭联营经营权，母星方保留法理和黄金股。",
     habitable: 4,
     status: "core"
   },
@@ -649,6 +649,7 @@ let selectedStar = null;
 let selectedBody = null;
 let lastMeasureStar = null;
 let activeFaction = "all";
+let activeSystemScaleRoot = null;
 let currentYear = 2350;
 let lastFrameTime = performance.now();
 const pressedKeys = new Set();
@@ -713,6 +714,31 @@ function findLocalStar(value) {
 
 function localDistance(a, b) {
   return Math.hypot(a.xyz[0] - b.xyz[0], a.xyz[1] - b.xyz[1], a.xyz[2] - b.xyz[2]);
+}
+
+function controlRadius(source) {
+  return Number(source?.rule_info_time || 0) * Number(source?.info_speed || 0) * Number(source?.ftl_speed || 1);
+}
+
+function propagationRows(source) {
+  const radius = controlRadius(source);
+  return [
+    ["可容忍统治信息传播时间", `${Number(source?.rule_info_time || 0).toFixed(3)} 年`],
+    ["信息传播速度", `${Number(source?.info_speed || 0).toFixed(3)} ly/年`],
+    ["FTL速度倍率", `${Number(source?.ftl_speed || 1).toFixed(3)}×`],
+    ["实际控制半径", `${radius.toFixed(3)} ly`]
+  ];
+}
+
+function disposeObject(object) {
+  object.traverse?.((child) => {
+    child.geometry?.dispose?.();
+    if (Array.isArray(child.material)) {
+      child.material.forEach((material) => material?.dispose?.());
+    } else {
+      child.material?.dispose?.();
+    }
+  });
 }
 
 function moveCameraToStar(star, cameraDistance = 24) {
@@ -939,7 +965,7 @@ function addStars() {
     star.halo = halo;
     starLayer.add(halo);
 
-    const infoRadius = (star.rule_info_time || 0) * (star.info_speed || 0) * (star.ftl_speed || 1);
+    const infoRadius = controlRadius(star);
     if (infoRadius > 0) {
       const csGeometry = new THREE.SphereGeometry(infoRadius, 32, 24);
       const csMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.04, depthWrite: false });
@@ -1021,10 +1047,10 @@ function buildControls() {
     const row = document.createElement("button");
     row.type = "button";
     row.className = "legend-item";
+    row.dataset.faction = faction;
     row.innerHTML = `<span class="swatch" style="background:${factionColors[faction]}"></span><span>${faction}</span><span>${stars.filter((star) => star.faction === faction).length}</span>`;
     row.addEventListener("click", () => {
-      activeFaction = activeFaction === faction ? "all" : faction;
-      updateVisibility();
+      zoomFaction(activeFaction === faction ? "all" : faction);
     });
     legend.appendChild(row);
   });
@@ -1052,7 +1078,7 @@ function buildControls() {
 }
 
 function updateVisibility() {
-  const faction = activeFaction === "all" ? factionFilter.value : activeFaction;
+  const faction = factionFilter.value;
   const text = normalizeSearch(searchFilter.value);
   const objectType = objectTypeFilter.value;
   const spectral = spectralFilter.value;
@@ -1079,12 +1105,12 @@ function updateVisibility() {
     if (star.controlSphere) star.controlSphere.visible = visible;
     if (star.label) star.label.visible = visible;
     const highlight = activeFaction !== "all" && star.faction === activeFaction;
-    const isFilteredByFaction = faction !== "all" && star.faction !== faction && star.id !== "sol";
-    const highlightOpacity = (activeFaction === "all" || highlight || star.id === "sol") ? 1 : 0.15;
+    const mutedByHighlight = activeFaction !== "all" && !highlight && star.id !== "sol";
     
-    star.mesh.material.opacity = visible && !isFilteredByFaction ? highlightOpacity : 0.26;
-    star.mesh.material.transparent = isFilteredByFaction || activeFaction !== "all";
+    star.mesh.material.opacity = mutedByHighlight ? 0.18 : (star.objectType === "diffuse_cloud" ? 0.22 : 1);
+    star.mesh.material.transparent = mutedByHighlight || star.objectType === "diffuse_cloud";
     star.halo.material.opacity = highlight ? 0.55 : star.status === "outer" ? 0.16 : 0.28;
+    if (star.controlSphere) star.controlSphere.material.opacity = highlight ? 0.075 : 0.04;
   });
 
   labelLayer.visible = showLabels.checked;
@@ -1098,8 +1124,7 @@ function updateVisibility() {
   octantLayer.visible = showOctants.checked;
   quadrantBoundsLayer.visible = showQuadrantBounds.checked;
   legend.querySelectorAll(".legend-item").forEach((row) => {
-    const label = row.textContent ?? "";
-    row.classList.toggle("active", activeFaction !== "all" && label.includes(activeFaction));
+    row.classList.toggle("active", activeFaction !== "all" && row.dataset.faction === activeFaction);
   });
 }
 
@@ -1121,19 +1146,21 @@ function showDetails(star) {
     ["距离", `${star.distance.toFixed(2)} ly`],
     ["消息到达", `AD ${star.arrival.toFixed(2)}`],
     ["银河坐标", `(${star.xyz.map((n) => n.toFixed(1)).join(", ")}) ly`],
-    ["主星", star.className],
+    ["主星", formatMarkdown(star.className)],
     ["天体类型", star.objectType],
     ["光谱类型", star.spectralClass],
     ["恒星数", String(star.starCount)],
     ["行星数", `${star.planetCount}（确认 ${star.confirmedPlanets} / 候选 ${star.candidatePlanets}）`],
     ["势力类型", star.factionType],
-    ["行星统计", star.planets],
+    ["行星统计", formatMarkdown(star.planets)],
     ["现实口径", formatMarkdown(star.reality)],
     ["2350设定", formatMarkdown(star.setting)]
   ];
-  if (star.age) rows.push(["恒星年龄", star.age]);
-  if (star.lifespan) rows.push(["恒星寿命", star.lifespan]);
-  if (star.disasters) rows.push(["灾害特征", star.disasters]);
+  if (star.age) rows.push(["恒星年龄", formatMarkdown(star.age)]);
+  if (star.lifespan) rows.push(["恒星寿命", formatMarkdown(star.lifespan)]);
+  if (star.disasters) rows.push(["灾害特征", formatMarkdown(star.disasters)]);
+  if (star.hz_inner && star.hz_outer) rows.push(["宜居带", `${Number(star.hz_inner).toFixed(3)}-${Number(star.hz_outer).toFixed(3)} AU`]);
+  rows.push(...propagationRows(star));
   detailList.innerHTML = rows.map(([key, value]) => `<dt>${key}</dt><dd>${value}</dd>`).join("");
 }
 
@@ -1149,10 +1176,24 @@ function showBodyDetails(body, star) {
     ["宜居", body.habitable ? "是/准宜居" : "否"],
     ["说明", formatMarkdown(body.summary || "-")]
   ];
+  if (body.bodyType === "star" && star.hz_inner && star.hz_outer) {
+    rows.push(["恒星宜居带", `${Number(star.hz_inner).toFixed(3)}-${Number(star.hz_outer).toFixed(3)} AU`]);
+  }
+  rows.push(...propagationRows(body));
   detailList.innerHTML = rows.map(([key, value]) => `<dt>${key}</dt><dd>${value}</dd>`).join("");
 }
 
 function drawMeasurement(fromStar, toStar) {
+  const distance = localDistance(fromStar, toStar);
+  const from = toWorld(fromStar.xyz);
+  const to = toWorld(toStar.xyz);
+  const midpoint = new THREE.Vector3().addVectors(from, to).multiplyScalar(0.5);
+  const group = new THREE.Group();
+  group.userData.measurement = {
+    from: fromStar.id,
+    to: toStar.id,
+    distanceLy: Number(distance.toFixed(3))
+  };
   const material = new THREE.LineDashedMaterial({
     color: 0xffffff,
     dashSize: 0.42,
@@ -1161,18 +1202,21 @@ function drawMeasurement(fromStar, toStar) {
     opacity: 0.86
   });
   const line = new THREE.Line(
-    new THREE.BufferGeometry().setFromPoints([toWorld(fromStar.xyz), toWorld(toStar.xyz)]),
+    new THREE.BufferGeometry().setFromPoints([from, to]),
     material
   );
   line.computeLineDistances();
-  measurementLayer.add(line);
+  line.userData.measurementGroup = group;
+  const label = makeTextSprite(`${distance.toFixed(2)} ly`, "#ffffff", 18);
+  label.position.copy(midpoint).add(new THREE.Vector3(0, 0.58, 0));
+  label.userData.measurementGroup = group;
+  group.add(line, label);
+  measurementLayer.add(group);
   while (measurementLayer.children.length > 6) {
     const old = measurementLayer.children[0];
     measurementLayer.remove(old);
-    old.geometry?.dispose();
-    old.material?.dispose();
+    disposeObject(old);
   }
-  const distance = localDistance(fromStar, toStar);
   writeAgentOutput({
     action: "ctrlClickDistance",
     from: fromStar.short,
@@ -1183,8 +1227,12 @@ function drawMeasurement(fromStar, toStar) {
 }
 
 function zoomFaction(faction) {
-  activeFaction = faction;
-  factionFilter.value = faction;
+  activeFaction = faction || "all";
+  if (activeFaction === "all") {
+    updateVisibility();
+    writeAgentOutput({ action: "clearFactionHighlight" });
+    return [];
+  }
   const targets = stars.filter((star) => star.faction === faction);
   if (!targets.length) {
     updateVisibility();
@@ -1211,11 +1259,9 @@ function zoomFaction(faction) {
 
 function clearSystemView() {
   bodyMeshes.length = 0;
-  systemLayer.children.forEach((child) => {
-    child.geometry?.dispose?.();
-    child.material?.dispose?.();
-  });
+  systemLayer.children.forEach((child) => disposeObject(child));
   systemLayer.clear();
+  activeSystemScaleRoot = null;
 }
 
 function makeOrbit(radius, color = 0x8ca6c8) {
@@ -1249,6 +1295,20 @@ function scaledOrbit(body, index) {
   return 1.2 + Math.log10(Number(body.orbitAu) * 9 + 1) * 5.2 + index * 0.08;
 }
 
+function scaledOrbitAu(orbitAu) {
+  if (!orbitAu) return 0;
+  return 1.2 + Math.log10(Number(orbitAu) * 9 + 1) * 5.2;
+}
+
+function hasCuratedSystemDetails(star, bodies = []) {
+  return bodies.some((body) => {
+    const id = String(body.id || "");
+    if (id === `${star.id}-primary` || id === `${star.id}-cloud` || id === `${star.id}-resource-belt`) return false;
+    if (id.startsWith(`${star.id}-planet-`) && String(body.summary || "").includes("自动生成")) return false;
+    return true;
+  });
+}
+
 async function openSystemView(value = selectedStar?.id) {
   const star = typeof value === "object" ? value : findLocalStar(value);
   if (!star) throw new Error(`Star not found: ${value}`);
@@ -1274,9 +1334,31 @@ async function openSystemView(value = selectedStar?.id) {
   }
   clearSystemView();
   const center = toWorld(star.xyz);
+
+  if (!hasCuratedSystemDetails(star, payload.bodies)) {
+    moveCameraToStar(star, 5.5);
+    writeAgentOutput({ action: "openSystemZoomOnly", id: star.id, reason: "no curated system bodies" });
+    return payload;
+  }
+
   const scaleRoot = new THREE.Group();
   scaleRoot.position.copy(center);
   systemLayer.add(scaleRoot);
+  activeSystemScaleRoot = scaleRoot;
+
+  if (star.hz_inner && star.hz_outer && star.hz_outer > star.hz_inner) {
+    const inner = scaledOrbitAu(star.hz_inner);
+    const outer = scaledOrbitAu(star.hz_outer);
+    const hzGeometry = new THREE.RingGeometry(inner, outer, 160);
+    const hzMaterial = new THREE.MeshBasicMaterial({ color: 0x44ff88, transparent: true, opacity: 0.11, side: THREE.DoubleSide, depthWrite: false });
+    const hzMesh = new THREE.Mesh(hzGeometry, hzMaterial);
+    hzMesh.rotation.x = -Math.PI / 2;
+    hzMesh.userData.kind = "habitableZone";
+    scaleRoot.add(hzMesh);
+    const hzLabel = makeTextSprite("宜居带", "#9cf7b0", 17);
+    hzLabel.position.set(outer, 0.22, 0);
+    scaleRoot.add(hzLabel);
+  }
 
   payload.bodies.forEach((body, index) => {
     const orbitRadius = scaledOrbit(body, index);
@@ -1296,7 +1378,7 @@ async function openSystemView(value = selectedStar?.id) {
       return;
     }
     const angle = index * 1.78 + (star.id.length % 7);
-    const radius = body.bodyType === "star" ? 0.08 : bodyRadius(body.bodyType, body.habitable);
+    const radius = body.bodyType === "star" ? 0.055 : bodyRadius(body.bodyType, body.habitable);
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(radius, 24, 16),
       new THREE.MeshBasicMaterial({ color: bodyColor(body.bodyType), transparent: true, opacity: body.bodyType === "cloud" ? 0.45 : 1 })
@@ -1307,7 +1389,7 @@ async function openSystemView(value = selectedStar?.id) {
     scaleRoot.add(mesh);
     bodyMeshes.push(mesh);
 
-    const infoRadius = (body.rule_info_time || 0) * (body.info_speed || 0) * (body.ftl_speed || 1);
+    const infoRadius = controlRadius(body);
     if (infoRadius > 0) {
       const csGeometry = new THREE.SphereGeometry(infoRadius, 32, 24);
       const csMat = new THREE.MeshBasicMaterial({ color: bodyColor(body.bodyType), transparent: true, opacity: 0.05, depthWrite: false });
@@ -1316,20 +1398,10 @@ async function openSystemView(value = selectedStar?.id) {
       scaleRoot.add(controlSphere);
     }
 
-    const label = makeTextSprite(formatMarkdown(body.name), "#edf3f8", 19);
+    const label = makeTextSprite(body.name, "#edf3f8", 19);
     label.position.copy(mesh.position).add(new THREE.Vector3(0, radius + 0.34, 0));
     scaleRoot.add(label);
   });
-
-  if (star.hz_inner && star.hz_outer && star.hz_outer > star.hz_inner) {
-    const inner = Math.log10(Number(star.hz_inner) * 9 + 1) * 5.2 + 1.2;
-    const outer = Math.log10(Number(star.hz_outer) * 9 + 1) * 5.2 + 1.2;
-    const hzGeometry = new THREE.RingGeometry(inner, outer, 128);
-    const hzMaterial = new THREE.MeshBasicMaterial({ color: 0x44ff88, transparent: true, opacity: 0.1, side: THREE.DoubleSide });
-    const hzMesh = new THREE.Mesh(hzGeometry, hzMaterial);
-    hzMesh.rotation.x = -Math.PI / 2;
-    scaleRoot.add(hzMesh);
-  }
 
   controls.target.copy(center);
   if (payload.bodies.length <= 1) {
@@ -1367,13 +1439,34 @@ function updateFlyControls(deltaSeconds) {
 
 function setupInteraction() {
   const raycaster = new THREE.Raycaster();
+  raycaster.params.Line = raycaster.params.Line || {};
+  raycaster.params.Line.threshold = 0.35;
   const pointer = new THREE.Vector2();
 
-  function pick(event) {
+  function setPointer(event) {
     const rect = canvas.getBoundingClientRect();
     pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
     raycaster.setFromCamera(pointer, camera);
+  }
+
+  function measurementTargets() {
+    const targets = [];
+    measurementLayer.traverse((child) => {
+      if (child.userData.measurementGroup) targets.push(child);
+    });
+    return targets;
+  }
+
+  function pickMeasurement() {
+    const hits = raycaster.intersectObjects(measurementTargets(), false);
+    return hits.length ? hits[0].object.userData.measurementGroup : null;
+  }
+
+  function pick(event) {
+    setPointer(event);
+    const measurement = pickMeasurement();
+    if (measurement) return;
     const bodyHits = raycaster.intersectObjects(bodyMeshes.filter((mesh) => mesh.visible), false);
     if (bodyHits.length) {
       const body = bodyHits[0].object.userData.body;
@@ -1397,10 +1490,15 @@ function setupInteraction() {
 
   canvas.addEventListener("pointerdown", pick);
   canvas.addEventListener("dblclick", async (event) => {
-    const rect = canvas.getBoundingClientRect();
-    pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-    pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-    raycaster.setFromCamera(pointer, camera);
+    setPointer(event);
+    const measurement = pickMeasurement();
+    if (measurement) {
+      const removed = measurement.userData.measurement;
+      measurementLayer.remove(measurement);
+      disposeObject(measurement);
+      writeAgentOutput({ action: "removeMeasurement", ...removed });
+      return;
+    }
     const hits = raycaster.intersectObjects(starMeshes.filter((mesh) => mesh.visible), false);
     if (hits.length) {
       try {
@@ -1411,11 +1509,9 @@ function setupInteraction() {
     }
   });
   canvas.addEventListener("pointermove", (event) => {
-    const rect = canvas.getBoundingClientRect();
-    pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-    pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-    raycaster.setFromCamera(pointer, camera);
+    setPointer(event);
     const hits = [
+      ...raycaster.intersectObjects(measurementTargets(), false),
       ...raycaster.intersectObjects(bodyMeshes.filter((mesh) => mesh.visible), false),
       ...raycaster.intersectObjects(starMeshes.filter((mesh) => mesh.visible), false)
     ];
@@ -1530,14 +1626,25 @@ function exposeAgentApi() {
     openSystem: openSystemView,
     addStar: async (payload) => {
       const response = await fetch("/api/stars", {
-        method: "POST",
+        method: payload?.id && payload?.partial ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload?.partial ? Object.fromEntries(Object.entries(payload).filter(([key]) => key !== "partial")) : payload)
       });
       if (!response.ok) throw new Error(`API error: ${response.status}`);
       return response.json();
     },
-    updateStar: async (payload) => api.addStar(payload),
+    updateStar: async (payload) => api.addStar({ ...payload, partial: true }),
+    upsertBody: async (payload) => {
+      const response = await fetch("/api/system-bodies", {
+        method: payload?.partial ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload?.partial ? Object.fromEntries(Object.entries(payload).filter(([key]) => key !== "partial")) : payload)
+      });
+      if (!response.ok) throw new Error(`API error: ${response.status}`);
+      return response.json();
+    },
+    addBody: async (payload) => api.upsertBody(payload),
+    updateBody: async (payload) => api.upsertBody({ ...payload, partial: true }),
     clearSystem: () => {
       clearSystemView();
       writeAgentOutput({ action: "clearSystem" });

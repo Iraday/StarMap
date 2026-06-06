@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DB = ROOT / "data" / "stars.sqlite"
 DEFAULT_APP = ROOT / "app.js"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -238,8 +238,9 @@ def normalize_star_seed(raw: dict) -> dict:
     star.setdefault("disasters", "")
     star.setdefault("hz_inner", 0)
     star.setdefault("hz_outer", 0)
-    star.setdefault("rule_info_time", 0)
-    star.setdefault("info_speed", 0)
+    default_rule_time = 0.04 if star.get("faction") in {"自然天体/科研区", "本地星际介质"} else 0.12
+    star.setdefault("rule_info_time", default_rule_time)
+    star.setdefault("info_speed", 1)
     star.setdefault("ftl_speed", 1)
     return star
 
@@ -350,9 +351,19 @@ def iter_bodies(star: dict):
         item.setdefault("habitable", 0)
         item.setdefault("summary", "")
         item.setdefault("sortOrder", 0)
-        item.setdefault("rule_info_time", 0)
-        item.setdefault("info_speed", 0)
-        item.setdefault("ftl_speed", 1)
+        if item["bodyType"] in {"star", "brown_dwarf", "cloud"}:
+            default_rule_time = float(star.get("rule_info_time", 0.08) or 0.08)
+        elif item["bodyType"] == "station":
+            default_rule_time = 0.10
+        elif int(item.get("habitable", 0)):
+            default_rule_time = 0.12
+        elif item["bodyType"] == "belt":
+            default_rule_time = 0.03
+        else:
+            default_rule_time = 0.05
+        item.setdefault("rule_info_time", default_rule_time)
+        item.setdefault("info_speed", float(star.get("info_speed", 1) or 1))
+        item.setdefault("ftl_speed", float(star.get("ftl_speed", 1) or 1))
         yield item
 
 
