@@ -10,30 +10,11 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 from scripts.init_db import DEFAULT_DB, initialize_database, normalize_alias
+from scripts.seed_data import FACTION_COLORS, TIMELINE_MARKS
 
 
 ROOT = Path(__file__).resolve().parent
 DB_PATH = ROOT / "data" / "stars.sqlite"
-
-
-FACTION_COLORS = {
-    "太阳系": "#f4f2de",
-    "无限未来": "#ff6575",
-    "人类群星联合": "#68a8ff",
-    "明日晨曦": "#ffc857",
-    "S&F": "#b28cff",
-    "美丽花园巨企": "#78dd8a",
-    "近邻三角军工托管区": "#e68a4e",
-    "星蓝元素": "#2bd7ff",
-    "巴纳德星际动力": "#b9bdc5",
-    "拉卡伊冶金公会": "#d5eef2",
-    "沃尔夫潮汐能源财团": "#6fd3c7",
-    "Ross 128生态城邦": "#a3efb6",
-    "远岭联营": "#e6b06f",
-    "南爪边境开发集团": "#d070ff",
-    "外环水蛇-北落师门采掘同盟": "#b9b86b",
-    "许可/争议区": "#93a0ad",
-}
 
 
 def connect() -> sqlite3.Connection:
@@ -45,6 +26,11 @@ def connect() -> sqlite3.Connection:
 
 
 def row_to_star(row: sqlite3.Row) -> dict:
+    keys = set(row.keys())
+
+    def get(key: str, default=None):
+        return row[key] if key in keys else default
+
     return {
         "id": row["id"],
         "name": row["name"],
@@ -62,6 +48,18 @@ def row_to_star(row: sqlite3.Row) -> dict:
         "setting": row["setting"],
         "habitable": row["habitable"],
         "status": row["status"],
+        "objectType": get("object_type", "star_system"),
+        "spectralClass": get("spectral_class", ""),
+        "starCount": get("star_count", 1),
+        "planetCount": get("planet_count", 0),
+        "confirmedPlanets": get("confirmed_planets", 0),
+        "candidatePlanets": get("candidate_planets", 0),
+        "factionType": get("faction_type", ""),
+        "displayAfter": get("display_after", 0),
+        "displayUntil": get("display_until"),
+        "controlStart": get("control_start", 2350),
+        "controlEnd": get("control_end"),
+        "notes": get("notes", ""),
     }
 
 
@@ -157,6 +155,9 @@ class StarMapHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/stars":
             self.handle_add_star()
             return
+        if parsed.path == "/api/system-bodies":
+            self.handle_add_body()
+            return
         self.send_json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
 
     def send_json(self, payload: dict | list, status: HTTPStatus = HTTPStatus.OK) -> None:
@@ -177,8 +178,16 @@ class StarMapHandler(SimpleHTTPRequestHandler):
                     self.send_json(api_docs())
                 elif path == "/api/stars":
                     self.send_json(self.list_stars(con, params))
+                elif path == "/api/search":
+                    self.send_json(self.list_stars(con, params))
                 elif path == "/api/factions":
-                    self.send_json(self.list_factions(con))
+                    self.send_json(self.list_factions(con, params))
+                elif path == "/api/filter-options":
+                    self.send_json(self.api_filter_options(con))
+                elif path == "/api/timeline":
+                    self.send_json(self.api_timeline(con))
+                elif path == "/api/system":
+                    self.send_json(self.api_system(con, params))
                 elif path == "/api/star":
                     key = params.get("id", params.get("name", [""]))[0]
                     star = find_star(con, key)
@@ -201,6 +210,34 @@ class StarMapHandler(SimpleHTTPRequestHandler):
         if faction and faction != "all":
             where.append("faction = ?")
             values.append(faction)
+        q = params.get("q", params.get("search", [""]))[0].strip()
+        if q:
+            like = f"%{q}%"
+            where.append("(id LIKE ? OR name LIKE ? OR short LIKE ? OR faction LIKE ? OR class_name LIKE ? OR planets LIKE ? OR setting LIKE ?)")
+            values.extend([like] * 7)
+        class_filter = params.get("class", params.get("spectral", ["all"]))[0]
+        if class_filter and class_filter != "all":
+            where.append("(spectral_class LIKE ? OR class_name LIKE ?)")
+            values.extend([f"%{class_filter}%", f"%{class_filter}%"])
+        object_type = params.get("objectType", params.get("object_type", ["all"]))[0]
+        if object_type and object_type != "all":
+            where.append("object_type = ?")
+            values.append(object_type)
+        faction_type = params.get("factionType", params.get("faction_type", ["all"]))[0]
+        if faction_type and faction_type != "all":
+            where.append("faction_type = ?")
+            values.append(faction_type)
+        if "minPlanets" in params:
+            where.append("planet_count >= ?")
+            values.append(int(params["minPlanets"][0]))
+        if "maxPlanets" in params:
+            where.append("planet_count <= ?")
+            values.append(int(params["maxPlanets"][0]))
+        year = int(float(params.get("year", ["2350"])[0]))
+        where.append("display_after <= ?")
+        values.append(year)
+        where.append("(display_until IS NULL OR display_until >= ?)")
+        values.append(year)
         if query_bool(params, "habitableOnly"):
             where.append("habitable >= 1")
         if not query_bool(params, "includeOuter", True):
@@ -208,17 +245,21 @@ class StarMapHandler(SimpleHTTPRequestHandler):
         sql = "SELECT * FROM stars"
         if where:
             sql += " WHERE " + " AND ".join(where)
-        sql += " ORDER BY CASE octant WHEN '原点' THEN '000' ELSE octant END, octant_order, distance"
+        sql += " ORDER BY CASE WHEN octant = '原点' THEN 0 ELSE 1 END, octant, octant_order, distance"
         return [row_to_star(row) for row in con.execute(sql, values)]
 
-    def list_factions(self, con: sqlite3.Connection) -> list[dict]:
+    def list_factions(self, con: sqlite3.Connection, params: dict[str, list[str]] | None = None) -> list[dict]:
+        params = params or {}
+        year = int(float(params.get("year", ["2350"])[0]))
         rows = con.execute(
             """
             SELECT faction, COUNT(*) AS count, MIN(CAST(NULLIF(rank, '-') AS INTEGER)) AS best_rank
             FROM stars
+            WHERE display_after <= ? AND (display_until IS NULL OR display_until >= ?)
             GROUP BY faction
             ORDER BY COALESCE(best_rank, 999), faction
-            """
+            """,
+            (year, year),
         ).fetchall()
         return [
             {
@@ -229,6 +270,70 @@ class StarMapHandler(SimpleHTTPRequestHandler):
             }
             for row in rows
         ]
+
+    def api_filter_options(self, con: sqlite3.Connection) -> dict:
+        def distinct(column: str) -> list[str]:
+            return [
+                row[0]
+                for row in con.execute(
+                    f"SELECT DISTINCT {column} FROM stars WHERE {column} IS NOT NULL AND {column} != '' ORDER BY {column}"
+                ).fetchall()
+            ]
+
+        planet_range = con.execute("SELECT MIN(planet_count), MAX(planet_count) FROM stars").fetchone()
+        return {
+            "objectTypes": distinct("object_type"),
+            "spectralClasses": distinct("spectral_class"),
+            "factionTypes": distinct("faction_type"),
+            "factions": self.list_factions(con, {"year": ["2350"]}),
+            "planetCount": {"min": planet_range[0] or 0, "max": planet_range[1] or 0},
+        }
+
+    def api_timeline(self, con: sqlite3.Connection) -> dict:
+        min_year, max_year = con.execute(
+            """
+            SELECT MIN(display_after), MAX(COALESCE(display_until, 2402))
+            FROM stars
+            """
+        ).fetchone()
+        return {
+            "minYear": min(min_year or 2200, 2200),
+            "maxYear": max(max_year or 2402, 2402),
+            "defaultYear": 2350,
+            "marks": TIMELINE_MARKS,
+        }
+
+    def api_system(self, con: sqlite3.Connection, params: dict[str, list[str]]) -> dict:
+        key = params.get("id", params.get("star", params.get("name", [""])))[0]
+        star = find_star(con, key)
+        if not star:
+            return {"error": "Star not found"}
+        rows = con.execute(
+            """
+            SELECT *
+            FROM system_bodies
+            WHERE star_id = ?
+            ORDER BY sort_order, orbit_au, name
+            """,
+            (star["id"],),
+        ).fetchall()
+        bodies = [
+            {
+                "id": row["id"],
+                "starId": row["star_id"],
+                "parentId": row["parent_id"],
+                "name": row["name"],
+                "bodyType": row["body_type"],
+                "orbitAu": row["orbit_au"],
+                "radiusLabel": row["radius_label"],
+                "massLabel": row["mass_label"],
+                "habitable": row["habitable"],
+                "summary": row["summary"],
+                "sortOrder": row["sort_order"],
+            }
+            for row in rows
+        ]
+        return {"star": star, "bodies": bodies}
 
     def api_distance(self, con: sqlite3.Connection, params: dict[str, list[str]]) -> dict:
         a = find_star(con, params.get("from", [""])[0])
@@ -255,12 +360,21 @@ class StarMapHandler(SimpleHTTPRequestHandler):
         limit = max(1, min(int(params.get("limit", ["5"])[0]), 50))
         include_outer = query_bool(params, "includeOuter", True)
         habitable_only = query_bool(params, "habitableOnly")
+        object_type = params.get("objectType", ["all"])[0]
+        faction_type = params.get("factionType", ["all"])[0]
+        year = int(float(params.get("year", ["2350"])[0]))
         candidates = []
         for row in con.execute("SELECT * FROM stars WHERE id != ?", (origin["id"],)):
             star = row_to_star(row)
+            if star["displayAfter"] > year or (star["displayUntil"] is not None and star["displayUntil"] < year):
+                continue
             if not include_outer and star["status"] == "outer":
                 continue
             if habitable_only and star["habitable"] < 1:
+                continue
+            if object_type != "all" and star["objectType"] != object_type:
+                continue
+            if faction_type != "all" and star["factionType"] != faction_type:
                 continue
             candidates.append({"star": star, "distanceLy": round(distance_between(origin, star), 3)})
         candidates.sort(key=lambda item: item["distanceLy"])
@@ -288,9 +402,12 @@ class StarMapHandler(SimpleHTTPRequestHandler):
                 INSERT OR REPLACE INTO stars (
                   id, name, short, octant, octant_order, distance, arrival,
                   x, y, z, faction, rank, class_name, planets, reality,
-                  setting, habitable, status, updated_at
+                  setting, habitable, status, object_type, spectral_class,
+                  star_count, planet_count, confirmed_planets, candidate_planets,
+                  faction_type, display_after, display_until, control_start,
+                  control_end, notes, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 """,
                 (
                     payload["id"],
@@ -311,6 +428,18 @@ class StarMapHandler(SimpleHTTPRequestHandler):
                     payload.get("setting", ""),
                     int(payload.get("habitable", 0)),
                     payload.get("status", "core"),
+                    payload.get("objectType", payload.get("object_type", "star_system")),
+                    payload.get("spectralClass", payload.get("spectral_class", payload.get("className", "unknown"))),
+                    int(payload.get("starCount", payload.get("star_count", 1))),
+                    int(payload.get("planetCount", payload.get("planet_count", 0))),
+                    int(payload.get("confirmedPlanets", payload.get("confirmed_planets", payload.get("planetCount", 0)))),
+                    int(payload.get("candidatePlanets", payload.get("candidate_planets", 0))),
+                    payload.get("factionType", payload.get("faction_type", "未分类")),
+                    int(payload.get("displayAfter", payload.get("display_after", 0))),
+                    payload.get("displayUntil", payload.get("display_until")),
+                    int(payload.get("controlStart", payload.get("control_start", 2350))),
+                    payload.get("controlEnd", payload.get("control_end")),
+                    payload.get("notes", ""),
                 ),
             )
             for value in (payload["id"], payload["name"], payload["short"]):
@@ -321,23 +450,64 @@ class StarMapHandler(SimpleHTTPRequestHandler):
             con.commit()
         self.send_json({"ok": True, "star": payload}, HTTPStatus.CREATED)
 
+    def handle_add_body(self) -> None:
+        length = int(self.headers.get("Content-Length", "0"))
+        payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        required = ["id", "starId", "name", "bodyType"]
+        missing = [key for key in required if key not in payload]
+        if missing:
+            self.send_json({"error": "Missing required fields", "missing": missing}, HTTPStatus.BAD_REQUEST)
+            return
+        with connect() as con:
+            con.execute(
+                """
+                INSERT OR REPLACE INTO system_bodies (
+                  id, star_id, parent_id, name, body_type, orbit_au,
+                  radius_label, mass_label, habitable, summary, sort_order
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    payload["id"],
+                    payload["starId"],
+                    payload.get("parentId"),
+                    payload["name"],
+                    payload["bodyType"],
+                    float(payload.get("orbitAu", 0)),
+                    payload.get("radiusLabel", ""),
+                    payload.get("massLabel", ""),
+                    int(payload.get("habitable", 0)),
+                    payload.get("summary", ""),
+                    int(payload.get("sortOrder", 0)),
+                ),
+            )
+            con.commit()
+        self.send_json({"ok": True, "body": payload}, HTTPStatus.CREATED)
+
 
 def api_docs() -> dict:
     return {
         "endpoints": {
-            "GET /api/stars": "List stars. Query: faction, habitableOnly=1, includeOuter=0.",
+            "GET /api/stars": "List stars. Query: q, faction, class, objectType, factionType, minPlanets, maxPlanets, year, habitableOnly=1, includeOuter=0.",
+            "GET /api/search": "Alias of /api/stars for agent filter/search calls.",
             "GET /api/star?id=gj1002": "Find a star by id, name, short name, or alias.",
             "GET /api/factions": "List factions with counts and colors.",
+            "GET /api/filter-options": "Return distinct object types, spectral classes, faction types, and planet count range.",
+            "GET /api/timeline": "Return available year range and canonical timeline marks.",
+            "GET /api/system?id=li-hartman": "Return a star and its internal bodies/orbits.",
             "GET /api/distance?from=gj1002&to=teegarden": "Calculate 3D distance in light years.",
             "GET /api/nearest?from=gj1002&limit=5": "List nearest systems from a given star.",
             "GET /api/zoom-target?star=gj1002": "Return target/camera coordinates for agent-driven zoom.",
             "POST /api/stars": "Add or replace a star record. JSON body follows the app star schema.",
+            "POST /api/system-bodies": "Add or replace a clickable body inside a star system.",
         },
         "agentBrowserApi": [
             "window.StarMapAgent.zoomToStar(idOrName)",
             "window.StarMapAgent.distanceBetween(from, to)",
             "window.StarMapAgent.nearestTo(from, limit)",
-            "window.StarMapAgent.searchStars(text)",
+            "window.StarMapAgent.searchStars(textOrFilters)",
+            "window.StarMapAgent.filterStars(filters)",
+            "window.StarMapAgent.openSystem(idOrName)",
             "window.StarMapAgent.getState()",
         ],
     }

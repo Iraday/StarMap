@@ -121,22 +121,44 @@ input {
 
 select,
 input[type="range"],
-input[type="text"] {
+input[type="text"],
+input[type="number"] {
   width: 100%;
 }
 
 select,
-input[type="text"] {
+input[type="text"],
+input[type="number"] {
   min-height: 38px;
   padding: 0 10px;
   border: 1px solid var(--panel-border);
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(6, 9, 13, 0.9);
+  color: var(--text);
+}
+
+select option {
+  background: #090d12;
   color: var(--text);
 }
 
 input[type="text"]::placeholder {
   color: rgba(158, 174, 190, 0.75);
+}
+
+.filter-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.control-block.compact {
+  margin-top: 0;
+}
+
+.control-block.compact label {
+  margin-bottom: 5px;
 }
 
 .control-grid {
@@ -224,8 +246,23 @@ button[aria-pressed="true"] {
   grid-template-columns: 12px 1fr auto;
   align-items: center;
   gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  padding: 5px 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
   color: var(--muted);
+  text-align: left;
   font-size: 12px;
+}
+
+.legend-item:hover,
+.legend-item:focus-visible,
+.legend-item.active {
+  border-color: rgba(114, 214, 201, 0.45);
+  background: rgba(237, 243, 248, 0.07);
+  color: var(--text);
 }
 
 .swatch {
@@ -295,6 +332,11 @@ button[aria-pressed="true"] {
 
   .mast h1 {
     font-size: 21px;
+  }
+
+  .filter-grid,
+  .switches {
+    grid-template-columns: 1fr;
   }
 
   .hud {

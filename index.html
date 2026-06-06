@@ -32,6 +32,39 @@
           </select>
         </div>
 
+        <div class="filter-grid" aria-label="星图筛选">
+          <div class="control-block compact">
+            <label for="searchFilter">检索</label>
+            <input id="searchFilter" type="text" list="starNames" placeholder="恒星系 / 势力 / 备注" />
+          </div>
+          <div class="control-block compact">
+            <label for="objectTypeFilter">天体类型</label>
+            <select id="objectTypeFilter">
+              <option value="all">全部类型</option>
+            </select>
+          </div>
+          <div class="control-block compact">
+            <label for="spectralFilter">恒星类型</label>
+            <select id="spectralFilter">
+              <option value="all">全部光谱</option>
+            </select>
+          </div>
+          <div class="control-block compact">
+            <label for="factionTypeFilter">势力类型</label>
+            <select id="factionTypeFilter">
+              <option value="all">全部类型</option>
+            </select>
+          </div>
+          <div class="control-block compact">
+            <label for="minPlanets">行星下限</label>
+            <input id="minPlanets" type="number" min="0" max="12" value="0" step="1" />
+          </div>
+          <div class="control-block compact">
+            <label for="yearSlider">时间 <span id="yearLabel">2350</span></label>
+            <input id="yearSlider" type="range" min="2200" max="2402" value="2350" step="1" />
+          </div>
+        </div>
+
         <div class="control-grid">
           <button id="resetView" type="button">重置视角</button>
           <button id="topView" type="button">北银极视角</button>
@@ -64,6 +97,7 @@
             <input id="distanceTo" type="text" list="starNames" placeholder="to" />
           </div>
           <button id="calcDistance" type="button">计算距离</button>
+          <button id="openSystem" type="button">打开内部结构</button>
           <pre id="agentOutput" aria-live="polite"></pre>
           <datalist id="starNames"></datalist>
         </div>
