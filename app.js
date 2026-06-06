@@ -638,7 +638,8 @@ const territoryLayer = new THREE.Group();
 const starLayer = new THREE.Group();
 const measurementLayer = new THREE.Group();
 const systemLayer = new THREE.Group();
-scene.add(root, octantLayer, territoryLayer, starLayer, measurementLayer, systemLayer, labelLayer);
+const quadrantBoundsLayer = new THREE.Group();
+scene.add(root, octantLayer, territoryLayer, starLayer, measurementLayer, systemLayer, labelLayer, quadrantBoundsLayer);
 
 const starMeshes = [];
 const bodyMeshes = [];
@@ -651,6 +652,13 @@ let activeFaction = "all";
 let currentYear = 2350;
 let lastFrameTime = performance.now();
 const pressedKeys = new Set();
+
+function formatMarkdown(text) {
+  if (!text) return "";
+  return String(text)
+    .replace(/\*([^*]+)\*/g, "<i>$1</i>")
+    .replace(/_([^_]+)_/g, "<i>$1</i>");
+}
 
 function toWorld([x, y, z]) {
   return new THREE.Vector3(x, z, y);
@@ -808,6 +816,18 @@ function addReferenceGeometry() {
     sprite.position.set(x, y, z);
     octantLayer.add(sprite);
   });
+
+  ["+++", "++-", "+-+", "+--", "-++", "-+-", "--+", "---"].forEach((octant) => {
+    const xDir = octant[0] === "+" ? 1 : -1;
+    const yDir = octant[2] === "+" ? 1 : -1;
+    const zDir = octant[1] === "+" ? 1 : -1;
+    const geometry = new THREE.BoxGeometry(25, 25, 25);
+    const edges = new THREE.EdgesGeometry(geometry);
+    const color = new THREE.Color().setHSL(Math.random(), 0.6, 0.5);
+    const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.3 }));
+    line.position.set(xDir * 12.5, yDir * 12.5, zDir * 12.5);
+    quadrantBoundsLayer.add(line);
+  });
 }
 
 function makeCircle(radius, segments, material) {
@@ -846,17 +866,28 @@ function addStarfield() {
   scene.add(new THREE.Points(geometry, material));
 }
 
+function getStarRadius(star) {
+  if (star.objectType === "diffuse_cloud") return 1.15;
+  if (star.objectType === "brown_dwarf" || star.objectType === "substellar_object") return 0.24;
+  if (star.id === "sol") return 0.82;
+  const spec = String(star.spectralClass || "").toUpperCase();
+  let size = baseRadius;
+  if (spec.includes("O") || spec.includes("B")) size = 0.9;
+  else if (spec.includes("A")) size = 0.7;
+  else if (spec.includes("F")) size = 0.6;
+  else if (spec.includes("G")) size = 0.5;
+  else if (spec.includes("K")) size = 0.4;
+  else if (spec.includes("M")) size = 0.3;
+  else if (spec.includes("D")) size = 0.15;
+  else size = 0.4;
+  return size + Math.min(star.habitable || 0, 4) * 0.05 + (star.status === "core" ? 0.05 : 0);
+}
+
 function addStars() {
   const sphere = new THREE.SphereGeometry(1, 24, 16);
   stars.forEach((star) => {
     const color = factionColors[star.faction] || factionColors["许可/争议区"];
-    const radius = star.objectType === "diffuse_cloud"
-      ? 1.15
-      : star.objectType === "brown_dwarf" || star.objectType === "substellar_object"
-        ? 0.24
-        : star.id === "sol"
-      ? 0.82
-      : baseRadius + Math.min(star.habitable, 4) * 0.12 + (star.status === "core" ? 0.08 : 0);
+    const radius = getStarRadius(star);
     const material = new THREE.MeshBasicMaterial({
       color,
       transparent: star.objectType === "diffuse_cloud",
@@ -884,6 +915,16 @@ function addStars() {
     halo.userData.followCamera = true;
     star.halo = halo;
     starLayer.add(halo);
+
+    const infoRadius = (star.rule_info_time || 0) * (star.info_speed || 0) * (star.ftl_speed || 1);
+    if (infoRadius > 0) {
+      const csGeometry = new THREE.SphereGeometry(infoRadius, 32, 24);
+      const csMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.04, depthWrite: false });
+      const controlSphere = new THREE.Mesh(csGeometry, csMat);
+      controlSphere.position.copy(mesh.position);
+      starLayer.add(controlSphere);
+      star.controlSphere = controlSphere;
+    }
 
     const label = makeTextSprite(star.short, color, star.id === "sol" ? 32 : 25);
     label.position.copy(mesh.position).add(new THREE.Vector3(0, radius * 1.9 + 0.55, 0));
@@ -935,7 +976,19 @@ function buildControls() {
   spectralFilter.querySelectorAll("option:not([value='all'])").forEach((option) => option.remove());
   factionTypeFilter.querySelectorAll("option:not([value='all'])").forEach((option) => option.remove());
 
-  const factions = Array.from(new Set(stars.map((star) => star.faction))).filter((faction) => faction !== "太阳系");
+  const factionRanks = new Map();
+  stars.forEach((s) => {
+    let r = parseInt(s.rank);
+    if (isNaN(r)) r = 999;
+    if (!factionRanks.has(s.faction) || r < factionRanks.get(s.faction)) {
+      factionRanks.set(s.faction, r);
+    }
+  });
+  
+  const factions = Array.from(factionRanks.keys())
+    .filter((faction) => faction !== "太阳系")
+    .sort((a, b) => factionRanks.get(a) - factionRanks.get(b));
+    
   factions.forEach((faction) => {
     const option = document.createElement("option");
     option.value = faction;
@@ -946,7 +999,10 @@ function buildControls() {
     row.type = "button";
     row.className = "legend-item";
     row.innerHTML = `<span class="swatch" style="background:${factionColors[faction]}"></span><span>${faction}</span><span>${stars.filter((star) => star.faction === faction).length}</span>`;
-    row.addEventListener("click", () => zoomFaction(faction));
+    row.addEventListener("click", () => {
+      activeFaction = activeFaction === faction ? "all" : faction;
+      updateVisibility();
+    });
     legend.appendChild(row);
   });
 
@@ -997,10 +1053,13 @@ function updateVisibility() {
     if (habitableOnly.checked && star.id !== "sol" && star.habitable < 1) visible = false;
     star.mesh.visible = visible;
     star.halo.visible = visible;
-    star.label.visible = visible && showLabels.checked;
-    const highlight = faction !== "all" && star.faction === faction;
-    star.mesh.material.opacity = visible && (faction === "all" || highlight || star.id === "sol") ? 1 : 0.26;
-    star.mesh.material.transparent = faction !== "all" && !highlight && star.id !== "sol";
+    if (star.controlSphere) star.controlSphere.visible = visible;
+    const highlight = activeFaction !== "all" && star.faction === activeFaction;
+    const isFilteredByFaction = faction !== "all" && star.faction !== faction && star.id !== "sol";
+    const highlightOpacity = (activeFaction === "all" || highlight || star.id === "sol") ? 1 : 0.15;
+    
+    star.mesh.material.opacity = visible && !isFilteredByFaction ? highlightOpacity : 0.26;
+    star.mesh.material.transparent = isFilteredByFaction || activeFaction !== "all";
     star.halo.material.opacity = highlight ? 0.55 : star.status === "outer" ? 0.16 : 0.28;
   });
 
@@ -1012,21 +1071,16 @@ function updateVisibility() {
     line.visible = Boolean(starA?.mesh.visible && starB?.mesh.visible);
   });
   octantLayer.visible = showOctants.checked;
+  quadrantBoundsLayer.visible = showQuadrantBounds.checked;
   legend.querySelectorAll(".legend-item").forEach((row) => {
     const label = row.textContent ?? "";
-    row.classList.toggle("active", faction !== "all" && label.includes(faction));
+    row.classList.toggle("active", activeFaction !== "all" && label.includes(activeFaction));
   });
 }
 
 function updateScale() {
   stars.forEach((star) => {
-    const radius = star.objectType === "diffuse_cloud"
-      ? 1.15
-      : star.objectType === "brown_dwarf" || star.objectType === "substellar_object"
-        ? 0.24
-        : star.id === "sol"
-      ? 0.82
-      : baseRadius + Math.min(star.habitable, 4) * 0.12 + (star.status === "core" ? 0.08 : 0);
+    const radius = getStarRadius(star);
     star.mesh.scale.setScalar(radius * Number(starScale.value));
   });
 }
@@ -1034,7 +1088,7 @@ function updateScale() {
 function showDetails(star) {
   selectedStar = star;
   selectedBody = null;
-  detailTitle.textContent = star.name;
+  detailTitle.innerHTML = formatMarkdown(star.name);
   const rows = [
     ["势力", star.faction],
     ["实力序", String(star.rank)],
@@ -1049,23 +1103,26 @@ function showDetails(star) {
     ["行星数", `${star.planetCount}（确认 ${star.confirmedPlanets} / 候选 ${star.candidatePlanets}）`],
     ["势力类型", star.factionType],
     ["行星统计", star.planets],
-    ["现实口径", star.reality],
-    ["2350设定", star.setting]
+    ["现实口径", formatMarkdown(star.reality)],
+    ["2350设定", formatMarkdown(star.setting)]
   ];
+  if (star.age) rows.push(["恒星年龄", star.age]);
+  if (star.lifespan) rows.push(["恒星寿命", star.lifespan]);
+  if (star.disasters) rows.push(["灾害特征", star.disasters]);
   detailList.innerHTML = rows.map(([key, value]) => `<dt>${key}</dt><dd>${value}</dd>`).join("");
 }
 
 function showBodyDetails(body, star) {
   selectedBody = body;
-  detailTitle.textContent = `${star.short} / ${body.name}`;
+  detailTitle.innerHTML = formatMarkdown(`${star.short} / ${body.name}`);
   const rows = [
-    ["所属恒星系", star.name],
+    ["所属恒星系", formatMarkdown(star.name)],
     ["天体类型", body.bodyType],
     ["轨道", `${Number(body.orbitAu).toFixed(3)} AU`],
     ["尺度", body.radiusLabel || "-"],
     ["质量", body.massLabel || "-"],
     ["宜居", body.habitable ? "是/准宜居" : "否"],
-    ["说明", body.summary || "-"]
+    ["说明", formatMarkdown(body.summary || "-")]
   ];
   detailList.innerHTML = rows.map(([key, value]) => `<dt>${key}</dt><dd>${value}</dd>`).join("");
 }
@@ -1225,10 +1282,29 @@ async function openSystemView(value = selectedStar?.id) {
     scaleRoot.add(mesh);
     bodyMeshes.push(mesh);
 
-    const label = makeTextSprite(body.name, "#edf3f8", 19);
+    const infoRadius = (body.rule_info_time || 0) * (body.info_speed || 0) * (body.ftl_speed || 1);
+    if (infoRadius > 0) {
+      const csGeometry = new THREE.SphereGeometry(infoRadius, 32, 24);
+      const csMat = new THREE.MeshBasicMaterial({ color: bodyColor(body.bodyType), transparent: true, opacity: 0.05, depthWrite: false });
+      const controlSphere = new THREE.Mesh(csGeometry, csMat);
+      controlSphere.position.copy(mesh.position);
+      scaleRoot.add(controlSphere);
+    }
+
+    const label = makeTextSprite(formatMarkdown(body.name), "#edf3f8", 19);
     label.position.copy(mesh.position).add(new THREE.Vector3(0, radius + 0.34, 0));
     scaleRoot.add(label);
   });
+
+  if (star.hz_inner && star.hz_outer && star.hz_outer > star.hz_inner) {
+    const inner = Math.log10(Number(star.hz_inner) * 9 + 1) * 5.2 + 1.2;
+    const outer = Math.log10(Number(star.hz_outer) * 9 + 1) * 5.2 + 1.2;
+    const hzGeometry = new THREE.RingGeometry(inner, outer, 128);
+    const hzMaterial = new THREE.MeshBasicMaterial({ color: 0x44ff88, transparent: true, opacity: 0.1, side: THREE.DoubleSide });
+    const hzMesh = new THREE.Mesh(hzGeometry, hzMaterial);
+    hzMesh.rotation.x = -Math.PI / 2;
+    scaleRoot.add(hzMesh);
+  }
 
   controls.target.copy(center);
   camera.position.set(center.x + 9.5, center.y + 7.2, center.z + 9.5);
@@ -1423,6 +1499,16 @@ function exposeAgentApi() {
     searchStars,
     filterStars,
     openSystem: openSystemView,
+    addStar: async (payload) => {
+      const response = await fetch("/api/stars", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) throw new Error(`API error: ${response.status}`);
+      return response.json();
+    },
+    updateStar: async (payload) => api.addStar(payload),
     clearSystem: () => {
       clearSystemView();
       writeAgentOutput({ action: "clearSystem" });
@@ -1446,7 +1532,9 @@ function exposeAgentApi() {
 }
 
 function bindUi() {
-  [showLabels, showTerritories, showOctants, showOuter, habitableOnly, objectTypeFilter, spectralFilter, factionTypeFilter].forEach((el) => {
+  const showQuadrantBounds = document.querySelector("#showQuadrantBounds");
+  
+  [showLabels, showTerritories, showOctants, showQuadrantBounds, showOuter, habitableOnly, objectTypeFilter, spectralFilter, factionTypeFilter].forEach((el) => {
     el.addEventListener("change", updateVisibility);
   });
   factionFilter.addEventListener("change", () => {
@@ -1504,6 +1592,18 @@ function bindUi() {
       writeAgentOutput(error.message);
     }
   });
+
+  const agentAction = document.querySelector("#agentAction");
+  const agentSingleTools = document.querySelector("#agentSingleTools");
+  const agentDistanceTools = document.querySelector("#agentDistanceTools");
+  
+  if (agentAction) {
+    agentAction.addEventListener("change", () => {
+      agentOutput.style.display = agentAction.value !== "none" ? "block" : "none";
+      agentSingleTools.style.display = agentAction.value === "single" ? "block" : "none";
+      agentDistanceTools.style.display = agentAction.value === "distance" ? "block" : "none";
+    });
+  }
 
   window.addEventListener("keydown", (event) => {
     const key = event.key.toLowerCase();

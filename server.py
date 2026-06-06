@@ -60,6 +60,14 @@ def row_to_star(row: sqlite3.Row) -> dict:
         "controlStart": get("control_start", 2350),
         "controlEnd": get("control_end"),
         "notes": get("notes", ""),
+        "age": get("age", ""),
+        "lifespan": get("lifespan", ""),
+        "disasters": get("disasters", ""),
+        "hz_inner": get("hz_inner", 0),
+        "hz_outer": get("hz_outer", 0),
+        "rule_info_time": get("rule_info_time", 0),
+        "info_speed": get("info_speed", 0),
+        "ftl_speed": get("ftl_speed", 1),
     }
 
 
@@ -330,6 +338,9 @@ class StarMapHandler(SimpleHTTPRequestHandler):
                 "habitable": row["habitable"],
                 "summary": row["summary"],
                 "sortOrder": row["sort_order"],
+                "rule_info_time": row["rule_info_time"],
+                "info_speed": row["info_speed"],
+                "ftl_speed": row["ftl_speed"],
             }
             for row in rows
         ]
@@ -405,9 +416,10 @@ class StarMapHandler(SimpleHTTPRequestHandler):
                   setting, habitable, status, object_type, spectral_class,
                   star_count, planet_count, confirmed_planets, candidate_planets,
                   faction_type, display_after, display_until, control_start,
-                  control_end, notes, updated_at
+                  control_end, notes, updated_at, age, lifespan, disasters,
+                  hz_inner, hz_outer, rule_info_time, info_speed, ftl_speed
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     payload["id"],
@@ -440,6 +452,14 @@ class StarMapHandler(SimpleHTTPRequestHandler):
                     int(payload.get("controlStart", payload.get("control_start", 2350))),
                     payload.get("controlEnd", payload.get("control_end")),
                     payload.get("notes", ""),
+                    payload.get("age", ""),
+                    payload.get("lifespan", ""),
+                    payload.get("disasters", ""),
+                    float(payload.get("hz_inner", 0)),
+                    float(payload.get("hz_outer", 0)),
+                    float(payload.get("rule_info_time", 0)),
+                    float(payload.get("info_speed", 0)),
+                    float(payload.get("ftl_speed", 1)),
                 ),
             )
             for value in (payload["id"], payload["name"], payload["short"]):
@@ -463,9 +483,10 @@ class StarMapHandler(SimpleHTTPRequestHandler):
                 """
                 INSERT OR REPLACE INTO system_bodies (
                   id, star_id, parent_id, name, body_type, orbit_au,
-                  radius_label, mass_label, habitable, summary, sort_order
+                  radius_label, mass_label, habitable, summary, sort_order,
+                  rule_info_time, info_speed, ftl_speed
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     payload["id"],
@@ -479,6 +500,9 @@ class StarMapHandler(SimpleHTTPRequestHandler):
                     int(payload.get("habitable", 0)),
                     payload.get("summary", ""),
                     int(payload.get("sortOrder", 0)),
+                    float(payload.get("rule_info_time", 0)),
+                    float(payload.get("info_speed", 0)),
+                    float(payload.get("ftl_speed", 1)),
                 ),
             )
             con.commit()

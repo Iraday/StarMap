@@ -51,6 +51,14 @@ CREATE TABLE IF NOT EXISTS stars (
   control_start INTEGER NOT NULL DEFAULT 2350,
   control_end INTEGER,
   notes TEXT NOT NULL DEFAULT '',
+  age TEXT NOT NULL DEFAULT '',
+  lifespan TEXT NOT NULL DEFAULT '',
+  disasters TEXT NOT NULL DEFAULT '',
+  hz_inner REAL NOT NULL DEFAULT 0,
+  hz_outer REAL NOT NULL DEFAULT 0,
+  rule_info_time REAL NOT NULL DEFAULT 0,
+  info_speed REAL NOT NULL DEFAULT 0,
+  ftl_speed REAL NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -71,7 +79,10 @@ CREATE TABLE IF NOT EXISTS system_bodies (
   mass_label TEXT NOT NULL DEFAULT '',
   habitable INTEGER NOT NULL DEFAULT 0,
   summary TEXT NOT NULL DEFAULT '',
-  sort_order INTEGER NOT NULL DEFAULT 0
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  rule_info_time REAL NOT NULL DEFAULT 0,
+  info_speed REAL NOT NULL DEFAULT 0,
+  ftl_speed REAL NOT NULL DEFAULT 1
 );
 
 CREATE INDEX IF NOT EXISTS idx_stars_faction ON stars(faction);
@@ -94,6 +105,14 @@ STAR_COLUMNS = {
     "control_start": "INTEGER NOT NULL DEFAULT 2350",
     "control_end": "INTEGER",
     "notes": "TEXT NOT NULL DEFAULT ''",
+    "age": "TEXT NOT NULL DEFAULT ''",
+    "lifespan": "TEXT NOT NULL DEFAULT ''",
+    "disasters": "TEXT NOT NULL DEFAULT ''",
+    "hz_inner": "REAL NOT NULL DEFAULT 0",
+    "hz_outer": "REAL NOT NULL DEFAULT 0",
+    "rule_info_time": "REAL NOT NULL DEFAULT 0",
+    "info_speed": "REAL NOT NULL DEFAULT 0",
+    "ftl_speed": "REAL NOT NULL DEFAULT 1",
 }
 
 
@@ -214,6 +233,14 @@ def normalize_star_seed(raw: dict) -> dict:
     star.setdefault("controlStart", 2350)
     star.setdefault("controlEnd", None)
     star.setdefault("notes", "")
+    star.setdefault("age", "")
+    star.setdefault("lifespan", "")
+    star.setdefault("disasters", "")
+    star.setdefault("hz_inner", 0)
+    star.setdefault("hz_outer", 0)
+    star.setdefault("rule_info_time", 0)
+    star.setdefault("info_speed", 0)
+    star.setdefault("ftl_speed", 1)
     return star
 
 
@@ -323,6 +350,9 @@ def iter_bodies(star: dict):
         item.setdefault("habitable", 0)
         item.setdefault("summary", "")
         item.setdefault("sortOrder", 0)
+        item.setdefault("rule_info_time", 0)
+        item.setdefault("info_speed", 0)
+        item.setdefault("ftl_speed", 1)
         yield item
 
 
@@ -366,9 +396,10 @@ def initialize_database(db_path: Path = DEFAULT_DB, app_path: Path = DEFAULT_APP
                   setting, habitable, status, object_type, spectral_class,
                   star_count, planet_count, confirmed_planets, candidate_planets,
                   faction_type, display_after, display_until, control_start,
-                  control_end, notes
+                  control_end, notes, age, lifespan, disasters, hz_inner, hz_outer,
+                  rule_info_time, info_speed, ftl_speed
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     star["id"],
@@ -401,6 +432,14 @@ def initialize_database(db_path: Path = DEFAULT_DB, app_path: Path = DEFAULT_APP
                     int(star["controlStart"]),
                     star["controlEnd"],
                     star["notes"],
+                    str(star["age"]),
+                    str(star["lifespan"]),
+                    str(star["disasters"]),
+                    float(star["hz_inner"]),
+                    float(star["hz_outer"]),
+                    float(star["rule_info_time"]),
+                    float(star["info_speed"]),
+                    float(star["ftl_speed"]),
                 ),
             )
             for alias in iter_aliases(star):
@@ -413,9 +452,10 @@ def initialize_database(db_path: Path = DEFAULT_DB, app_path: Path = DEFAULT_APP
                     """
                     INSERT INTO system_bodies (
                       id, star_id, parent_id, name, body_type, orbit_au,
-                      radius_label, mass_label, habitable, summary, sort_order
+                      radius_label, mass_label, habitable, summary, sort_order,
+                      rule_info_time, info_speed, ftl_speed
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         body["id"],
@@ -429,6 +469,9 @@ def initialize_database(db_path: Path = DEFAULT_DB, app_path: Path = DEFAULT_APP
                         int(body["habitable"]),
                         body["summary"],
                         int(body["sortOrder"]),
+                        float(body["rule_info_time"]),
+                        float(body["info_speed"]),
+                        float(body["ftl_speed"]),
                     ),
                 )
         con.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

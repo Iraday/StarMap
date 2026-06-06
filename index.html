@@ -76,6 +76,7 @@
           <label><input id="showLabels" type="checkbox" checked /> 名称</label>
           <label><input id="showTerritories" type="checkbox" checked /> 势力连线</label>
           <label><input id="showOctants" type="checkbox" checked /> 八象限</label>
+          <label><input id="showQuadrantBounds" type="checkbox" /> 八象限边界</label>
           <label><input id="showOuter" type="checkbox" checked /> 边界外环</label>
           <label><input id="habitableOnly" type="checkbox" /> 只看宜居/准宜居</label>
         </div>
@@ -86,19 +87,28 @@
         </div>
 
         <div class="agent-tools" aria-label="Agent 接口快捷操作">
-          <label for="agentStar">Agent 接口</label>
-          <input id="agentStar" type="text" list="starNames" placeholder="gj1002 / Teegarden / 李-哈特曼" />
-          <div class="control-grid">
-            <button id="zoomStar" type="button">Zoom 到恒星系</button>
-            <button id="nearestStar" type="button">最近恒星系</button>
+          <label for="agentAction">Agent 接口</label>
+          <select id="agentAction">
+            <option value="none">-- 选择操作 --</option>
+            <option value="single">单星操作 (Zoom/内部/最近)</option>
+            <option value="distance">计算距离</option>
+          </select>
+          <div id="agentSingleTools" style="display: none; margin-top: 8px;">
+            <input id="agentStar" type="text" list="starNames" placeholder="gj1002 / Teegarden / 李-哈特曼" />
+            <div class="control-grid" style="margin-top: 8px;">
+              <button id="zoomStar" type="button">Zoom 到恒星系</button>
+              <button id="openSystem" type="button">打开内部结构</button>
+              <button id="nearestStar" type="button">最近恒星系</button>
+            </div>
           </div>
-          <div class="distance-row">
-            <input id="distanceFrom" type="text" list="starNames" placeholder="from" />
-            <input id="distanceTo" type="text" list="starNames" placeholder="to" />
+          <div id="agentDistanceTools" style="display: none; margin-top: 8px;">
+            <div class="distance-row">
+              <input id="distanceFrom" type="text" list="starNames" placeholder="from" />
+              <input id="distanceTo" type="text" list="starNames" placeholder="to" />
+            </div>
+            <button id="calcDistance" type="button" style="width: 100%; margin-top: 8px;">计算距离</button>
           </div>
-          <button id="calcDistance" type="button">计算距离</button>
-          <button id="openSystem" type="button">打开内部结构</button>
-          <pre id="agentOutput" aria-live="polite"></pre>
+          <pre id="agentOutput" aria-live="polite" style="display: none;"></pre>
           <datalist id="starNames"></datalist>
         </div>
 
