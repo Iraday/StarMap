@@ -1077,6 +1077,7 @@ function updateVisibility() {
     star.mesh.visible = visible;
     star.halo.visible = visible;
     if (star.controlSphere) star.controlSphere.visible = visible;
+    if (star.label) star.label.visible = visible;
     const highlight = activeFaction !== "all" && star.faction === activeFaction;
     const isFilteredByFaction = faction !== "all" && star.faction !== faction && star.id !== "sol";
     const highlightOpacity = (activeFaction === "all" || highlight || star.id === "sol") ? 1 : 0.15;
@@ -1086,6 +1087,7 @@ function updateVisibility() {
     star.halo.material.opacity = highlight ? 0.55 : star.status === "outer" ? 0.16 : 0.28;
   });
 
+  labelLayer.visible = showLabels.checked;
   territoryLayer.visible = showTerritories.checked;
   territoryLayer.children.forEach((line) => {
     const [a, b] = line.userData.link;
