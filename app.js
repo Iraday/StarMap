@@ -631,7 +631,7 @@ function buildControls() {
     row.type = "button";
     row.className = "legend-item";
     row.dataset.faction = faction;
-    const cycleHtml = count > 1 ? `<span class="legend-count">${count} <button class="cycle-btn" title="循环定位该势力恒星系">⟳</button></span>` : `<span>${count}</span>`;
+    const cycleHtml = `<span class="legend-count">${count} <button class="cycle-btn" title="循环定位该势力恒星系">⟳</button></span>`;
     row.innerHTML = `<span class="swatch" style="background:${factionColors[faction]}"></span><span>${faction}</span>${cycleHtml}`;
     row.addEventListener("click", () => {
       zoomFaction(activeFaction === faction ? "all" : faction);
@@ -716,13 +716,24 @@ function updateLegendCounts() {
         row.appendChild(cycleSpan);
       }
     } else {
+      // count <= 1: always keep cycle button, just update number
       if (countEl) {
-        // downgrade to plain span
-        const newSpan = document.createElement("span");
-        newSpan.textContent = String(count);
-        countEl.replaceWith(newSpan);
+        countEl.firstChild.textContent = count + " ";
       } else if (spanEl) {
-        spanEl.textContent = String(count);
+        // convert plain span to cycle-button span
+        const cycleSpan = document.createElement("span");
+        cycleSpan.className = "legend-count";
+        cycleSpan.innerHTML = `${count} <button class="cycle-btn" title="循环定位该势力恒星系">⟳</button>`;
+        cycleSpan.querySelector(".cycle-btn").addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (activeFaction !== faction) zoomFaction(faction);
+          const fStars = stars.filter((s) => s.faction === faction && isGloballyVisible(s));
+          if (!fStars.length) return;
+          const idx = (factionCycleIndex.get(faction) || 0) % fStars.length;
+          moveCameraToStar(fStars[idx], 8);
+          factionCycleIndex.set(faction, idx + 1);
+        });
+        spanEl.replaceWith(cycleSpan);
       }
     }
   });
@@ -798,8 +809,8 @@ function showDetails(star) {
     detailRow("概览", "势力", star.faction),
     detailRow("概览", "实力序", String(star.rank)),
     detailRow("概览", "八象限", star.octant),
-    detailRow("概览", "距离", `${star.distance.toFixed(2)} ly`),
-    detailRow("概览", "消息到达", `AD ${star.arrival.toFixed(2)}`),
+    detailRow("概览", "到太阳系距离", `${star.distance.toFixed(2)} ly`),
+    detailRow("概览", "太阳系内战消息到达", `AD ${(2278 + star.distance).toFixed(2)}`),
     detailRow("概览", "银河坐标", `(${star.xyz.map((n) => n.toFixed(1)).join(", ")}) ly`),
     detailRow("天文", "主星", formatMarkdown(star.className)),
     detailRow("天文", "天体类型", star.objectType),
