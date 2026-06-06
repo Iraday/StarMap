@@ -4,6 +4,11 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 const canvas = document.querySelector("#map");
 const detailTitle = document.querySelector("#detailTitle");
 const detailList = document.querySelector("#detailList");
+const detailTabs = document.querySelector("#detailTabs");
+const detailSideNav = document.querySelector("#detailSideNav");
+const detailFieldControls = document.querySelector("#detailFieldControls");
+const detailSelectAll = document.querySelector("#detailSelectAll");
+const detailSelectNone = document.querySelector("#detailSelectNone");
 const factionFilter = document.querySelector("#factionFilter");
 const legend = document.querySelector("#legend");
 const showLabels = document.querySelector("#showLabels");
@@ -26,6 +31,10 @@ const minPlanets = document.querySelector("#minPlanets");
 const yearSlider = document.querySelector("#yearSlider");
 const yearLabel = document.querySelector("#yearLabel");
 
+const MAP_RADIUS = 50;
+const INNER_RADIUS = 25;
+const CAMERA_HOME = new THREE.Vector3(78, 58, 84);
+
 const factionColors = {
   "太阳系": "#f4f2de",
   "无限未来": "#ff6575",
@@ -44,7 +53,6 @@ const factionColors = {
   "外环水蛇-北落师门采掘同盟": "#b9b86b",
   "许可/争议区": "#93a0ad",
   "自然天体/科研区": "#8ca6c8",
-  "本地星际介质": "#74c0d8",
   "白矮星科研封存区": "#dfe8ff"
 };
 
@@ -575,17 +583,17 @@ const fallbackStars = [
     id: "li-hartman",
     name: "_李-哈特曼_ / _Li-Hartman_",
     short: "_Li-Hartman_",
-    octant: "---",
-    order: 6,
-    distance: 22.3,
-    arrival: 2300.3,
-    xyz: [-7.3, -11.8, -17.5],
+    octant: "++-",
+    order: 5.7,
+    distance: 22.2,
+    arrival: 2300.2,
+    xyz: [0.6, 9.2, -20.2],
     faction: "远岭联营",
     rank: 12,
-    className: "_设定_ K3V",
-    planets: "4 主级宜居/准宜居；_原野星_、_草原星_、_釉海星_、_匣_；_阙穹_ 76 卫星。",
-    reality: "_架空锚点_，置于 HD 20794 与 LTT 1445 A 邻近外缘。",
-    setting: "_边境黄金压力锅_，远岭联营经营权，母星方保留法理和黄金股。",
+    className: "_K3V 橙矮星（架空）_",
+    planets: "_原野星、草原星、釉海星、匣为主级宜居/准宜居；阙穹 76 卫星。_",
+    reality: "_架空锚点，置于 GJ 1002 附近的 -+-/++- 象限交界处，坐标用于星蓝元素-自动舰接触线推演。_",
+    setting: "_边境黄金压力锅：远岭联营经营权，母星方保留法理和黄金股。_",
     habitable: 4,
     status: "core"
   },
@@ -613,10 +621,10 @@ let stars = [];
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color("#07090d");
-scene.fog = new THREE.Fog("#07090d", 58, 105);
+scene.fog = new THREE.Fog("#07090d", 95, 175);
 
-const camera = new THREE.PerspectiveCamera(48, 1, 0.1, 200);
-camera.position.set(43, 34, 47);
+const camera = new THREE.PerspectiveCamera(48, 1, 0.1, 320);
+camera.position.copy(CAMERA_HOME);
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -628,7 +636,7 @@ controls.dampingFactor = 0.06;
 controls.rotateSpeed = 0.65;
 controls.zoomSpeed = 0.9;
 controls.minDistance = 14;
-controls.maxDistance = 105;
+controls.maxDistance = 180;
 controls.target.set(0, 0, 0);
 
 const root = new THREE.Group();
@@ -653,12 +661,103 @@ let activeSystemScaleRoot = null;
 let currentYear = 2350;
 let lastFrameTime = performance.now();
 const pressedKeys = new Set();
+let currentDetailTitleHtml = "";
+let currentDetailRows = [];
+let renderingFieldControls = false;
+const detailFieldVisibility = new Map(
+  JSON.parse(localStorage.getItem("starmap-detail-fields") || "[]")
+);
+
+function saveDetailFieldVisibility() {
+  localStorage.setItem("starmap-detail-fields", JSON.stringify(Array.from(detailFieldVisibility.entries())));
+}
+
+function detailRow(group, key, value) {
+  return { group, key, value };
+}
+
+function fieldVisible(key) {
+  return !detailFieldVisibility.has(key) || detailFieldVisibility.get(key);
+}
+
+function setAllDetailFields(rows, visible) {
+  rows.forEach((row) => detailFieldVisibility.set(row.key, visible));
+  saveDetailFieldVisibility();
+  renderDetailPanel(currentDetailTitleHtml, currentDetailRows);
+}
+
+function renderFieldControls(rows) {
+  if (!detailFieldControls) return;
+  renderingFieldControls = true;
+  const keys = Array.from(new Set(rows.map((row) => row.key)));
+  detailFieldControls.innerHTML = keys.map((key) => {
+    const checked = fieldVisible(key) ? " checked" : "";
+    return `<label><input type="checkbox" value="${key}"${checked} /> ${key}</label>`;
+  }).join("");
+  detailFieldControls.querySelectorAll("input[type='checkbox']").forEach((input) => {
+    input.addEventListener("change", () => {
+      if (renderingFieldControls) return;
+      detailFieldVisibility.set(input.value, input.checked);
+      saveDetailFieldVisibility();
+      renderDetailPanel(currentDetailTitleHtml, currentDetailRows);
+    });
+  });
+  renderingFieldControls = false;
+}
+
+function renderDetailNav(groups) {
+  const links = groups.map((group, index) => {
+    const id = `detail-section-${index}`;
+    return `<a href="#${id}" data-target="${id}">${group}</a>`;
+  }).join("");
+  if (detailTabs) detailTabs.innerHTML = links;
+  if (detailSideNav) detailSideNav.innerHTML = links;
+  [detailTabs, detailSideNav].forEach((nav) => {
+    nav?.querySelectorAll("a").forEach((link) => {
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
+        document.querySelector(`#${link.dataset.target}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      });
+    });
+  });
+}
+
+function renderDetailPanel(titleHtml, rows) {
+  currentDetailTitleHtml = titleHtml;
+  currentDetailRows = rows;
+  detailTitle.innerHTML = titleHtml;
+  renderFieldControls(rows);
+  const visibleRows = rows.filter((row) => fieldVisible(row.key));
+  const groups = Array.from(new Set(visibleRows.map((row) => row.group)));
+  renderDetailNav(groups);
+  if (!visibleRows.length) {
+    detailList.innerHTML = `<p class="empty-detail">所有字段已隐藏。</p>`;
+    return;
+  }
+  detailList.innerHTML = groups.map((group, index) => {
+    const groupRows = visibleRows.filter((row) => row.group === group);
+    return `
+      <section class="detail-section" id="detail-section-${index}">
+        <h3>${group}</h3>
+        <dl>
+          ${groupRows.map((row) => `<dt>${row.key}</dt><dd>${row.value}</dd>`).join("")}
+        </dl>
+      </section>
+    `;
+  }).join("");
+}
 
 function formatMarkdown(text) {
   if (!text) return "";
   return String(text)
     .replace(/\*([^*]+)\*/g, "<i>$1</i>")
     .replace(/_([^_]+)_/g, "<i>$1</i>");
+}
+
+function ensureItalic(text) {
+  const value = String(text || "").trim();
+  if (!value) return value;
+  return value.startsWith("_") && value.endsWith("_") ? value : `_${value.replace(/^_+|_+$/g, "")}_`;
 }
 
 function toWorld([x, y, z]) {
@@ -679,6 +778,7 @@ async function loadStars() {
 
 function normalizeStar(star) {
   const className = star.className ?? star.class_name ?? "unknown";
+  const setting = star.setting ? ensureItalic(star.setting) : "";
   return {
     objectType: "star_system",
     spectralClass: className.slice(0, 1),
@@ -693,7 +793,8 @@ function normalizeStar(star) {
     controlEnd: null,
     notes: "",
     ...star,
-    className
+    className,
+    setting
   };
 }
 
@@ -723,10 +824,10 @@ function controlRadius(source) {
 function propagationRows(source) {
   const radius = controlRadius(source);
   return [
-    ["可容忍统治信息传播时间", `${Number(source?.rule_info_time || 0).toFixed(3)} 年`],
-    ["信息传播速度", `${Number(source?.info_speed || 0).toFixed(3)} ly/年`],
-    ["FTL速度倍率", `${Number(source?.ftl_speed || 1).toFixed(3)}×`],
-    ["实际控制半径", `${radius.toFixed(3)} ly`]
+    detailRow("控制", "可容忍统治信息传播时间", `${Number(source?.rule_info_time || 0).toFixed(3)} 年`),
+    detailRow("控制", "信息传播速度", `${Number(source?.info_speed || 0).toFixed(3)} ly/年`),
+    detailRow("控制", "FTL速度倍率", `${Number(source?.ftl_speed || 1).toFixed(3)}×`),
+    detailRow("控制", "实际控制半径", `${radius.toFixed(3)} ly`)
   ];
 }
 
@@ -821,17 +922,17 @@ function roundRect(ctx, x, y, width, height, radius) {
 }
 
 function addAxes() {
-  const axisLen = 31;
+  const axisLen = MAP_RADIUS + 8;
   const arrowX = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, 0), axisLen, 0xff6f61, 2.7, 1.25);
   const arrowY = new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, 0), axisLen, 0xe6d36a, 2.7, 1.25);
   const arrowZ = new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 0), axisLen, 0x8fa8ff, 2.7, 1.25);
   root.add(arrowX, arrowY, arrowZ);
 
   const labels = [
-    ["X+ 银心", [33.2, 0, 0], "#ff9389"],
-    ["Y+ 银河自旋", [0, 0, 33.2], "#f0df82"],
-    ["Z+ 北银极", [0, 33.2, 0], "#b4c4ff"],
-    ["25 ly 边界", [0, -28.5, 0], "#9eaebe"]
+    ["X+ 银心", [MAP_RADIUS + 10, 0, 0], "#ff9389"],
+    ["Y+ 银河自旋", [0, 0, MAP_RADIUS + 10], "#f0df82"],
+    ["Z+ 北银极", [0, MAP_RADIUS + 10, 0], "#b4c4ff"],
+    ["50 ly 边界", [0, -MAP_RADIUS - 6, 0], "#9eaebe"]
   ];
   labels.forEach(([text, position, color]) => {
     const sprite = makeTextSprite(text, color, 30);
@@ -842,14 +943,20 @@ function addAxes() {
 
 function addReferenceGeometry() {
   const ringMaterial = new THREE.LineBasicMaterial({ color: 0x7f8b99, transparent: true, opacity: 0.26 });
-  const circleXY = makeCircle(25, 128, ringMaterial);
+  const innerMaterial = new THREE.LineBasicMaterial({ color: 0x8fa8ff, transparent: true, opacity: 0.18 });
+  const circleXY = makeCircle(MAP_RADIUS, 160, ringMaterial);
   circleXY.rotation.x = Math.PI / 2;
-  const circleXZ = makeCircle(25, 128, ringMaterial);
-  const circleYZ = makeCircle(25, 128, ringMaterial);
+  const circleXZ = makeCircle(MAP_RADIUS, 160, ringMaterial);
+  const circleYZ = makeCircle(MAP_RADIUS, 160, ringMaterial);
   circleYZ.rotation.y = Math.PI / 2;
-  root.add(circleXY, circleXZ, circleYZ);
+  const innerXY = makeCircle(INNER_RADIUS, 128, innerMaterial);
+  innerXY.rotation.x = Math.PI / 2;
+  const innerXZ = makeCircle(INNER_RADIUS, 128, innerMaterial);
+  const innerYZ = makeCircle(INNER_RADIUS, 128, innerMaterial);
+  innerYZ.rotation.y = Math.PI / 2;
+  root.add(circleXY, circleXZ, circleYZ, innerXY, innerXZ, innerYZ);
 
-  const grid = new THREE.GridHelper(60, 12, 0x2d3b48, 0x18212b);
+  const grid = new THREE.GridHelper(MAP_RADIUS * 2.2, 22, 0x2d3b48, 0x18212b);
   grid.material.transparent = true;
   grid.material.opacity = 0.42;
   root.add(grid);
@@ -858,23 +965,38 @@ function addReferenceGeometry() {
   root.add(makePlaneSquare("xy", planeMat), makePlaneSquare("xz", planeMat), makePlaneSquare("yz", planeMat));
 
   ["+++", "++-", "+-+", "+--", "-++", "-+-", "--+", "---"].forEach((octant) => {
-    const x = octant[0] === "+" ? 29 : -29;
-    const y = octant[2] === "+" ? 29 : -29;
-    const z = octant[1] === "+" ? 29 : -29;
+    const x = octant[0] === "+" ? MAP_RADIUS + 6 : -MAP_RADIUS - 6;
+    const y = octant[2] === "+" ? MAP_RADIUS + 6 : -MAP_RADIUS - 6;
+    const z = octant[1] === "+" ? MAP_RADIUS + 6 : -MAP_RADIUS - 6;
     const sprite = makeTextSprite(octant, "#d8e2ec", 32);
     sprite.position.set(x, y, z);
     octantLayer.add(sprite);
   });
 
+  const octantColors = {
+    "+++": 0xff6f61,
+    "++-": 0x72d6c9,
+    "+-+": 0xe6d36a,
+    "+--": 0x8fa8ff,
+    "-++": 0xd070ff,
+    "-+-": 0x2bd7ff,
+    "--+": 0xff9d6a,
+    "---": 0xcbd5e1
+  };
   ["+++", "++-", "+-+", "+--", "-++", "-+-", "--+", "---"].forEach((octant) => {
     const xDir = octant[0] === "+" ? 1 : -1;
     const yDir = octant[2] === "+" ? 1 : -1;
     const zDir = octant[1] === "+" ? 1 : -1;
-    const geometry = new THREE.BoxGeometry(25, 25, 25);
+    const geometry = new THREE.BoxGeometry(MAP_RADIUS, MAP_RADIUS, MAP_RADIUS);
     const edges = new THREE.EdgesGeometry(geometry);
-    const color = new THREE.Color().setHSL(Math.random(), 0.6, 0.5);
-    const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.3 }));
-    line.position.set(xDir * 12.5, yDir * 12.5, zDir * 12.5);
+    const color = octantColors[octant];
+    const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.54 }));
+    const offset = 0.12;
+    line.position.set(
+      xDir * MAP_RADIUS * 0.5 + xDir * offset,
+      yDir * MAP_RADIUS * 0.5 + yDir * offset,
+      zDir * MAP_RADIUS * 0.5 + zDir * offset
+    );
     quadrantBoundsLayer.add(line);
   });
 }
@@ -889,7 +1011,7 @@ function makeCircle(radius, segments, material) {
 }
 
 function makePlaneSquare(kind, material) {
-  const s = 25;
+  const s = MAP_RADIUS;
   const points = kind === "xy"
     ? [new THREE.Vector3(-s, -s, 0), new THREE.Vector3(s, -s, 0), new THREE.Vector3(s, s, 0), new THREE.Vector3(-s, s, 0), new THREE.Vector3(-s, -s, 0)]
     : kind === "xz"
@@ -899,10 +1021,10 @@ function makePlaneSquare(kind, material) {
 }
 
 function addStarfield() {
-  const count = 900;
+  const count = 1200;
   const positions = new Float32Array(count * 3);
   for (let i = 0; i < count; i += 1) {
-    const radius = 62 + Math.random() * 36;
+    const radius = MAP_RADIUS + 18 + Math.random() * 58;
     const theta = Math.random() * Math.PI * 2;
     const phi = Math.acos(2 * Math.random() - 1);
     positions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
@@ -992,10 +1114,14 @@ function addTerritories() {
     ["kapteyn", "hd20794", "人类群星联合", false],
     ["kapteyn", "40eridani", "人类群星联合", false],
     ["40eridani", "ltt1445", "人类群星联合", true],
-    ["hd20794", "li-hartman", "人类群星联合", true],
+    ["gj1002", "li-hartman", "星蓝元素", true],
+    ["li-hartman", "trappist-1", "星蓝元素", true],
+    ["gj1002", "lhs1140", "星蓝元素", true],
     ["groombridge34", "hd219134", "S&F", false],
     ["hd219134", "107piscium", "S&F", true],
+    ["hd219134", "55cnc", "S&F", true],
     ["tau-ceti", "teegarden", "美丽花园巨企", false],
+    ["teegarden", "gj357", "美丽花园巨企", true],
     ["alpha", "epsilon-indi", "近邻三角军工托管区", true],
     ["barnard", "alpha", "近邻三角军工托管区", true],
     ["gj682", "gj667c", "南爪边境开发集团", false],
@@ -1138,49 +1264,48 @@ function updateScale() {
 function showDetails(star) {
   selectedStar = star;
   selectedBody = null;
-  detailTitle.innerHTML = formatMarkdown(star.name);
   const rows = [
-    ["势力", star.faction],
-    ["实力序", String(star.rank)],
-    ["八象限", star.octant],
-    ["距离", `${star.distance.toFixed(2)} ly`],
-    ["消息到达", `AD ${star.arrival.toFixed(2)}`],
-    ["银河坐标", `(${star.xyz.map((n) => n.toFixed(1)).join(", ")}) ly`],
-    ["主星", formatMarkdown(star.className)],
-    ["天体类型", star.objectType],
-    ["光谱类型", star.spectralClass],
-    ["恒星数", String(star.starCount)],
-    ["行星数", `${star.planetCount}（确认 ${star.confirmedPlanets} / 候选 ${star.candidatePlanets}）`],
-    ["势力类型", star.factionType],
-    ["行星统计", formatMarkdown(star.planets)],
-    ["现实口径", formatMarkdown(star.reality)],
-    ["2350设定", formatMarkdown(star.setting)]
+    detailRow("概览", "势力", star.faction),
+    detailRow("概览", "实力序", String(star.rank)),
+    detailRow("概览", "八象限", star.octant),
+    detailRow("概览", "距离", `${star.distance.toFixed(2)} ly`),
+    detailRow("概览", "消息到达", `AD ${star.arrival.toFixed(2)}`),
+    detailRow("概览", "银河坐标", `(${star.xyz.map((n) => n.toFixed(1)).join(", ")}) ly`),
+    detailRow("天文", "主星", formatMarkdown(star.className)),
+    detailRow("天文", "天体类型", star.objectType),
+    detailRow("天文", "光谱类型", star.spectralClass),
+    detailRow("天文", "恒星数", String(star.starCount)),
+    detailRow("天文", "行星数", `${star.planetCount}（确认 ${star.confirmedPlanets} / 候选 ${star.candidatePlanets}）`),
+    detailRow("势力", "势力类型", star.factionType),
+    detailRow("天文", "行星统计", formatMarkdown(star.planets)),
+    detailRow("现实", "现实口径", formatMarkdown(star.reality)),
+    detailRow("设定", "2350设定", formatMarkdown(star.setting))
   ];
-  if (star.age) rows.push(["恒星年龄", formatMarkdown(star.age)]);
-  if (star.lifespan) rows.push(["恒星寿命", formatMarkdown(star.lifespan)]);
-  if (star.disasters) rows.push(["灾害特征", formatMarkdown(star.disasters)]);
-  if (star.hz_inner && star.hz_outer) rows.push(["宜居带", `${Number(star.hz_inner).toFixed(3)}-${Number(star.hz_outer).toFixed(3)} AU`]);
+  if (star.age) rows.push(detailRow("天文", "恒星年龄", formatMarkdown(star.age)));
+  if (star.lifespan) rows.push(detailRow("天文", "恒星寿命", formatMarkdown(star.lifespan)));
+  if (star.disasters) rows.push(detailRow("天文", "灾害特征", formatMarkdown(star.disasters)));
+  if (star.hz_inner && star.hz_outer) rows.push(detailRow("天文", "宜居带", `${Number(star.hz_inner).toFixed(3)}-${Number(star.hz_outer).toFixed(3)} AU`));
   rows.push(...propagationRows(star));
-  detailList.innerHTML = rows.map(([key, value]) => `<dt>${key}</dt><dd>${value}</dd>`).join("");
+  renderDetailPanel(formatMarkdown(star.name), rows);
 }
 
 function showBodyDetails(body, star) {
+  selectedStar = star;
   selectedBody = body;
-  detailTitle.innerHTML = formatMarkdown(`${star.short} / ${body.name}`);
   const rows = [
-    ["所属恒星系", formatMarkdown(star.name)],
-    ["天体类型", body.bodyType],
-    ["轨道", `${Number(body.orbitAu).toFixed(3)} AU`],
-    ["尺度", body.radiusLabel || "-"],
-    ["质量", body.massLabel || "-"],
-    ["宜居", body.habitable ? "是/准宜居" : "否"],
-    ["说明", formatMarkdown(body.summary || "-")]
+    detailRow("概览", "所属恒星系", formatMarkdown(star.name)),
+    detailRow("概览", "天体类型", body.bodyType),
+    detailRow("轨道", "轨道", `${Number(body.orbitAu).toFixed(3)} AU`),
+    detailRow("物理", "尺度", body.radiusLabel || "-"),
+    detailRow("物理", "质量", body.massLabel || "-"),
+    detailRow("物理", "宜居", body.habitable ? "是/准宜居" : "否"),
+    detailRow("说明", "说明", formatMarkdown(body.summary || "-"))
   ];
   if (body.bodyType === "star" && star.hz_inner && star.hz_outer) {
-    rows.push(["恒星宜居带", `${Number(star.hz_inner).toFixed(3)}-${Number(star.hz_outer).toFixed(3)} AU`]);
+    rows.push(detailRow("轨道", "恒星宜居带", `${Number(star.hz_inner).toFixed(3)}-${Number(star.hz_outer).toFixed(3)} AU`));
   }
   rows.push(...propagationRows(body));
-  detailList.innerHTML = rows.map(([key, value]) => `<dt>${key}</dt><dd>${value}</dd>`).join("");
+  renderDetailPanel(formatMarkdown(`${star.short} / ${body.name}`), rows);
 }
 
 function drawMeasurement(fromStar, toStar) {
@@ -1499,6 +1624,21 @@ function setupInteraction() {
       writeAgentOutput({ action: "removeMeasurement", ...removed });
       return;
     }
+    const bodyHits = raycaster.intersectObjects(bodyMeshes.filter((mesh) => mesh.visible), false);
+    if (bodyHits.length) {
+      const body = bodyHits[0].object.userData.body;
+      const star = bodyHits[0].object.userData.star;
+      try {
+        if (!activeSystemScaleRoot || selectedStar?.id !== star.id) {
+          await openSystemView(star);
+        }
+        showBodyDetails(body, star);
+        writeAgentOutput({ action: "openBody", star: star.id, body: body.id });
+      } catch (error) {
+        writeAgentOutput(error.message);
+      }
+      return;
+    }
     const hits = raycaster.intersectObjects(starMeshes.filter((mesh) => mesh.visible), false);
     if (hits.length) {
       try {
@@ -1681,18 +1821,20 @@ function bindUi() {
   minPlanets.addEventListener("input", updateVisibility);
   yearSlider.addEventListener("input", updateVisibility);
   starScale.addEventListener("input", updateScale);
+  detailSelectAll?.addEventListener("click", () => setAllDetailFields(currentDetailRows, true));
+  detailSelectNone?.addEventListener("click", () => setAllDetailFields(currentDetailRows, false));
 
   document.querySelector("#resetView").addEventListener("click", () => {
     controls.target.set(0, 0, 0);
-    camera.position.set(43, 34, 47);
+    camera.position.copy(CAMERA_HOME);
   });
   document.querySelector("#topView").addEventListener("click", () => {
     controls.target.set(0, 0, 0);
-    camera.position.set(0, 68, 0.1);
+    camera.position.set(0, 112, 0.1);
   });
   document.querySelector("#planeView").addEventListener("click", () => {
     controls.target.set(0, 0, 0);
-    camera.position.set(48, 2.5, 0.1);
+    camera.position.set(88, 3.2, 0.1);
   });
   spinToggle.addEventListener("click", () => {
     controls.autoRotate = !controls.autoRotate;

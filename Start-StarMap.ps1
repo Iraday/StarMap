@@ -8,6 +8,32 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $Root
 
+function Stop-OldStarMap {
+  Write-Host "Checking for old StarMap server processes..." -ForegroundColor DarkCyan
+  try {
+    $escapedRoot = [Regex]::Escape($Root)
+    $oldProcesses = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+      Where-Object { $_.CommandLine -match "server\.py" -and $_.CommandLine -match $escapedRoot }
+    foreach ($proc in $oldProcesses) {
+      Write-Host "Stopping old StarMap process PID $($proc.ProcessId)" -ForegroundColor DarkYellow
+      Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+  } catch {
+    Write-Host "Could not inspect old StarMap processes: $($_.Exception.Message)" -ForegroundColor DarkYellow
+  }
+
+  try {
+    $listeners = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+    foreach ($listener in $listeners) {
+      Write-Host "Stopping process PID $($listener.OwningProcess) on port $Port" -ForegroundColor DarkYellow
+      Stop-Process -Id $listener.OwningProcess -Force -ErrorAction SilentlyContinue
+    }
+  } catch {
+    Write-Host "Could not inspect port $Port listeners: $($_.Exception.Message)" -ForegroundColor DarkYellow
+  }
+  Start-Sleep -Milliseconds 300
+}
+
 function Find-Python {
   $python = Get-Command python -ErrorAction SilentlyContinue
   if ($python) { return $python.Source }
@@ -22,6 +48,8 @@ function Test-PortOpen([int]$Candidate) {
   $conn = Get-NetTCPConnection -LocalPort $Candidate -State Listen -ErrorAction SilentlyContinue
   return $null -eq $conn
 }
+
+Stop-OldStarMap
 
 $SystemPython = Find-Python
 $VenvDir = ".venv"

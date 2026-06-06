@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DB = ROOT / "data" / "stars.sqlite"
 DEFAULT_APP = ROOT / "app.js"
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -204,8 +204,6 @@ def default_faction_type(star: dict) -> str:
     status = str(star.get("status", ""))
     if faction == "自然天体/科研区":
         return "自然/科研"
-    if faction == "本地星际介质":
-        return "星际介质"
     if status == "minor":
         return "中立/科研"
     if status == "outer":
@@ -215,6 +213,27 @@ def default_faction_type(star: dict) -> str:
     if star.get("rank") not in (None, "-"):
         return "巨企/类巨企"
     return "未分类"
+
+
+def fully_italic(value: str) -> bool:
+    text = str(value or "").strip()
+    return len(text) >= 2 and text.startswith("_") and text.endswith("_")
+
+
+def italicize(value: str) -> str:
+    text = str(value or "").strip()
+    if not text or fully_italic(text):
+        return text
+    return f"_{text.strip('_')}_"
+
+
+def normalize_fiction_text(value: str) -> str:
+    text = str(value or "").strip()
+    if text.startswith("_设定_"):
+        text = text[len("_设定_") :].strip()
+    if text.startswith("设定_"):
+        text = text[len("设定_") :].strip()
+    return italicize(text)
 
 
 def normalize_star_seed(raw: dict) -> dict:
@@ -238,10 +257,16 @@ def normalize_star_seed(raw: dict) -> dict:
     star.setdefault("disasters", "")
     star.setdefault("hz_inner", 0)
     star.setdefault("hz_outer", 0)
-    default_rule_time = 0.04 if star.get("faction") in {"自然天体/科研区", "本地星际介质"} else 0.12
+    default_rule_time = 0.04 if star.get("faction") == "自然天体/科研区" else 0.12
     star.setdefault("rule_info_time", default_rule_time)
     star.setdefault("info_speed", 1)
     star.setdefault("ftl_speed", 1)
+    if star.get("setting"):
+        star["setting"] = normalize_fiction_text(star["setting"])
+    if star.get("id") == "li-hartman":
+        for key in ("className", "planets", "reality", "age", "lifespan", "disasters"):
+            if star.get(key):
+                star[key] = normalize_fiction_text(star[key])
     return star
 
 
@@ -351,6 +376,10 @@ def iter_bodies(star: dict):
         item.setdefault("habitable", 0)
         item.setdefault("summary", "")
         item.setdefault("sortOrder", 0)
+        if star.get("id") == "li-hartman" and item.get("summary"):
+            item["summary"] = normalize_fiction_text(item["summary"])
+        elif str(item.get("summary", "")).strip().startswith("_设定_"):
+            item["summary"] = normalize_fiction_text(item["summary"])
         if item["bodyType"] in {"star", "brown_dwarf", "cloud"}:
             default_rule_time = float(star.get("rule_info_time", 0.08) or 0.08)
         elif item["bodyType"] == "station":

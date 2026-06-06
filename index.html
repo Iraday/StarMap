@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>2350 年人类文明太阳周边星图</title>
+    <title>2350 年人类文明太阳周边 50 光年星图</title>
     <link rel="stylesheet" href="./styles.css" />
     <script type="importmap">
       {
@@ -15,12 +15,12 @@
     </script>
   </head>
   <body>
-    <main id="app" aria-label="2350 年人类文明 3D 星图">
-      <canvas id="map" aria-label="可旋转的太阳周边三维恒星系地图"></canvas>
+    <main id="app" aria-label="2350 年人类文明 50 光年 3D 星图">
+      <canvas id="map" aria-label="可旋转的太阳周边 50 光年三维恒星系地图"></canvas>
 
       <section class="panel panel-left" aria-label="地图控制">
         <div class="mast">
-          <p class="kicker">AD 2350 / 25 ly</p>
+          <p class="kicker">AD 2350 / 50 ly</p>
           <h1>人类文明星图</h1>
           <p class="subline">银河坐标：X+ 银心，Y+ 银河自旋方向，Z+ 北银极</p>
         </div>
@@ -77,7 +77,7 @@
           <label><input id="showTerritories" type="checkbox" checked /> 势力连线</label>
           <label><input id="showOctants" type="checkbox" checked /> 八象限</label>
           <label><input id="showQuadrantBounds" type="checkbox" /> 八象限边界</label>
-          <label><input id="showOuter" type="checkbox" checked /> 边界外环</label>
+          <label><input id="showOuter" type="checkbox" checked /> 25-50 光年外环</label>
           <label><input id="habitableOnly" type="checkbox" /> 只看宜居/准宜居</label>
         </div>
 
@@ -120,7 +120,16 @@
           <p class="kicker">选中恒星系</p>
           <h2 id="detailTitle">太阳 / Sol</h2>
         </div>
-        <dl id="detailList"></dl>
+        <nav id="detailTabs" class="detail-tabs" aria-label="详情横向导航"></nav>
+        <div class="detail-tools" aria-label="详情字段控制">
+          <button id="detailSelectAll" type="button">全选</button>
+          <button id="detailSelectNone" type="button">全不选</button>
+        </div>
+        <div id="detailFieldControls" class="field-controls" aria-label="字段显示选择"></div>
+        <div class="detail-body">
+          <nav id="detailSideNav" class="detail-side-nav" aria-label="详情纵向导航"></nav>
+          <div id="detailList" class="detail-list"></div>
+        </div>
       </section>
 
       <div class="hud" aria-hidden="true">

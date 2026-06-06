@@ -9,7 +9,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from scripts.init_db import DEFAULT_DB, initialize_database, normalize_alias
+from scripts.init_db import DEFAULT_DB, initialize_database, normalize_alias, normalize_fiction_text
 from scripts.seed_data import FACTION_COLORS, TIMELINE_MARKS
 
 
@@ -444,6 +444,8 @@ class StarMapHandler(SimpleHTTPRequestHandler):
             if missing:
                 self.send_json({"error": "Missing required fields", "missing": missing}, HTTPStatus.BAD_REQUEST)
                 return
+            if record.get("setting"):
+                record["setting"] = normalize_fiction_text(record["setting"])
             x, y, z = record["xyz"]
             con.execute(
                 """
@@ -530,6 +532,8 @@ class StarMapHandler(SimpleHTTPRequestHandler):
             if missing:
                 self.send_json({"error": "Missing required fields", "missing": missing}, HTTPStatus.BAD_REQUEST)
                 return
+            if str(record.get("summary", "")).strip().startswith("_设定_"):
+                record["summary"] = normalize_fiction_text(record["summary"])
             con.execute(
                 """
                 INSERT OR REPLACE INTO system_bodies (
