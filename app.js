@@ -667,6 +667,8 @@ const pressedKeys = new Set();
 let currentDetailTitleHtml = "";
 let currentDetailRows = [];
 let renderingFieldControls = false;
+let systemViewStar = null;
+const factionCycleIndex = new Map();
 const detailGroupVisibility = new Map(
   JSON.parse(localStorage.getItem("starmap-detail-groups") || "[]")
 );
@@ -784,7 +786,7 @@ async function loadStars() {
 function normalizeStar(star) {
   const className = star.className ?? star.class_name ?? "unknown";
   const setting = star.setting ? ensureItalic(star.setting) : "";
-  return {
+  const normalized = {
     objectType: "star_system",
     spectralClass: className.slice(0, 1),
     starCount: 1,
@@ -801,6 +803,11 @@ function normalizeStar(star) {
     className,
     setting
   };
+  if (normalized.distance > 25) normalized.faction = "无/无所属";
+  if (normalized.faction === "许可/争议区" || normalized.faction === "白矮星科研封存区") {
+    normalized.faction = "无/无所属";
+  }
+  return normalized;
 }
 
 function normalizeSearch(value) {
@@ -1167,22 +1174,41 @@ function buildControls() {
   
   const factions = Array.from(factionRanks.keys())
     .filter((faction) => faction !== "太阳系")
-    .sort((a, b) => factionRanks.get(a) - factionRanks.get(b));
-    
+    .sort((a, b) => {
+      if (a === "无/无所属") return 1;
+      if (b === "无/无所属") return -1;
+      return factionRanks.get(a) - factionRanks.get(b);
+    });
+
   factions.forEach((faction) => {
     const option = document.createElement("option");
     option.value = faction;
     option.textContent = faction;
     factionFilter.appendChild(option);
 
+    const factionStarsList = stars.filter((star) => star.faction === faction);
+    const count = factionStarsList.length;
     const row = document.createElement("button");
     row.type = "button";
     row.className = "legend-item";
     row.dataset.faction = faction;
-    row.innerHTML = `<span class="swatch" style="background:${factionColors[faction]}"></span><span>${faction}</span><span>${stars.filter((star) => star.faction === faction).length}</span>`;
+    const cycleHtml = count > 1 ? `<span class="legend-count">${count} <button class="cycle-btn" title="循环定位该势力恒星系">⟳</button></span>` : `<span>${count}</span>`;
+    row.innerHTML = `<span class="swatch" style="background:${factionColors[faction]}"></span><span>${faction}</span>${cycleHtml}`;
     row.addEventListener("click", () => {
       zoomFaction(activeFaction === faction ? "all" : faction);
     });
+    const cycleBtn = row.querySelector(".cycle-btn");
+    if (cycleBtn) {
+      cycleBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (activeFaction !== faction) zoomFaction(faction);
+        const fStars = stars.filter((s) => s.faction === faction);
+        if (!fStars.length) return;
+        const idx = (factionCycleIndex.get(faction) || 0) % fStars.length;
+        moveCameraToStar(fStars[idx], 8);
+        factionCycleIndex.set(faction, idx + 1);
+      });
+    }
     legend.appendChild(row);
   });
 
@@ -1238,10 +1264,18 @@ function updateVisibility() {
     const highlight = activeFaction !== "all" && star.faction === activeFaction;
     const mutedByHighlight = activeFaction !== "all" && !highlight && star.id !== "sol";
     
-    star.mesh.material.opacity = mutedByHighlight ? 0.18 : (star.objectType === "diffuse_cloud" ? 0.22 : 1);
-    star.mesh.material.transparent = mutedByHighlight || star.objectType === "diffuse_cloud";
-    star.halo.material.opacity = highlight ? 0.55 : star.status === "outer" ? 0.16 : 0.28;
-    if (star.controlSphere) star.controlSphere.material.opacity = highlight ? 0.075 : 0.04;
+    if (inSystemView && systemViewStar && star.id === systemViewStar.id) {
+      star.mesh.material.transparent = true;
+      star.mesh.material.opacity = 0;
+      star.halo.visible = false;
+      if (star.label) star.label.visible = false;
+      if (star.controlSphere) star.controlSphere.visible = false;
+    } else {
+      star.mesh.material.opacity = mutedByHighlight ? 0.18 : (star.objectType === "diffuse_cloud" ? 0.22 : 1);
+      star.mesh.material.transparent = mutedByHighlight || star.objectType === "diffuse_cloud";
+      star.halo.material.opacity = highlight ? 0.55 : star.status === "outer" ? 0.16 : 0.28;
+      if (star.controlSphere) star.controlSphere.material.opacity = highlight ? 0.075 : 0.04;
+    }
   });
 
   labelLayer.visible = showLabels.checked;
@@ -1388,11 +1422,21 @@ function zoomFaction(faction) {
 }
 
 function clearSystemView() {
+  if (systemViewStar) {
+    const s = systemViewStar;
+    s.mesh.material.opacity = s.objectType === "diffuse_cloud" ? 0.22 : 1;
+    s.mesh.material.transparent = s.objectType === "diffuse_cloud";
+    if (s.halo) s.halo.visible = s.mesh.visible;
+    if (s.label) s.label.visible = s.mesh.visible && showLabels.checked;
+    if (s.controlSphere) s.controlSphere.visible = s.mesh.visible;
+    systemViewStar = null;
+  }
   bodyMeshes.length = 0;
   systemLayer.children.forEach((child) => disposeObject(child));
   systemLayer.clear();
   activeSystemScaleRoot = null;
   inSystemView = false;
+  controls.minDistance = 0.5;
 }
 
 function exitSystemView() {
@@ -1493,10 +1537,20 @@ async function openSystemView(value = selectedStar?.id) {
   systemLayer.add(scaleRoot);
   activeSystemScaleRoot = scaleRoot;
   inSystemView = true;
+  systemViewStar = star;
 
-  // Scale entire system to roughly match the star dot size (~0.05 of unscaled)
-  const systemScale = 0.045;
+  star.mesh.material.transparent = true;
+  star.mesh.material.opacity = 0;
+  if (star.halo) star.halo.visible = false;
+  if (star.label) star.label.visible = false;
+  if (star.controlSphere) star.controlSphere.visible = false;
+
+  const starRadius = getStarRadius(star) * Number(starScale.value);
+  const maxOrbit = Math.max(1, ...payload.bodies.map((b, i) => scaledOrbit(b, i)));
+  const systemScale = Math.min(0.06, starRadius / maxOrbit);
   scaleRoot.scale.setScalar(systemScale);
+
+  controls.minDistance = 0.01;
 
   if (star.hz_inner && star.hz_outer && star.hz_outer > star.hz_inner) {
     const inner = scaledOrbitAu(star.hz_inner);
@@ -1512,7 +1566,11 @@ async function openSystemView(value = selectedStar?.id) {
     scaleRoot.add(hzLabel);
   }
 
-  payload.bodies.forEach((body, index) => {
+  const bodyMeshById = new Map();
+  const nonMoons = payload.bodies.filter((b) => b.bodyType !== "moon");
+  const moons = payload.bodies.filter((b) => b.bodyType === "moon");
+
+  nonMoons.forEach((body, index) => {
     const orbitRadius = scaledOrbit(body, index);
     if (orbitRadius > 0 && body.bodyType !== "belt") {
       const orbit = makeOrbit(orbitRadius, body.habitable ? 0x78dd8a : 0x8ca6c8);
@@ -1530,35 +1588,87 @@ async function openSystemView(value = selectedStar?.id) {
       return;
     }
     const angle = index * 1.78 + (star.id.length % 7);
-    const radius = body.bodyType === "star" ? 0.055 : bodyRadius(body.bodyType, body.habitable);
+    const radius = body.bodyType === "star" ? 0.18 : bodyRadius(body.bodyType, body.habitable);
+    const color = body.bodyType === "star" ? bodyColor("star") : bodyColor(body.bodyType);
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(radius, 24, 16),
-      new THREE.MeshBasicMaterial({ color: bodyColor(body.bodyType), transparent: true, opacity: body.bodyType === "cloud" ? 0.45 : 1 })
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: body.bodyType === "cloud" ? 0.45 : 1 })
     );
     mesh.position.set(Math.cos(angle) * orbitRadius, 0, Math.sin(angle) * orbitRadius);
     mesh.userData.body = body;
     mesh.userData.star = star;
     scaleRoot.add(mesh);
     bodyMeshes.push(mesh);
+    bodyMeshById.set(body.id, mesh);
 
     const infoRadius = controlRadius(body);
     if (infoRadius > 0) {
       const csGeometry = new THREE.SphereGeometry(infoRadius, 32, 24);
-      const csMat = new THREE.MeshBasicMaterial({ color: bodyColor(body.bodyType), transparent: true, opacity: 0.05, depthWrite: false });
+      const csMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.05, depthWrite: false });
       const controlSphere = new THREE.Mesh(csGeometry, csMat);
       controlSphere.position.copy(mesh.position);
       scaleRoot.add(controlSphere);
     }
 
-    const label = makeTextSprite(body.name, "#edf3f8", 19);
+    const label = makeTextSprite(body.name, body.bodyType === "star" ? "#fff0a8" : "#edf3f8", 19);
     label.position.copy(mesh.position).add(new THREE.Vector3(0, radius + 0.34, 0));
     scaleRoot.add(label);
   });
 
-  // Zoom camera very close to the system center
+  moons.forEach((moon, moonIdx) => {
+    const parentMesh = moon.parentId ? bodyMeshById.get(moon.parentId) : null;
+    const moonOrbitRadius = 0.35 + moonIdx * 0.22 + Math.log10(Number(moon.orbitAu || 0.01) * 9 + 1) * 0.6;
+    const moonAngle = moonIdx * 2.4 + 0.5;
+    const radius = bodyRadius("moon", moon.habitable);
+
+    if (parentMesh) {
+      const orbit = makeOrbit(moonOrbitRadius, 0xd5dce8);
+      orbit.position.copy(parentMesh.position);
+      scaleRoot.add(orbit);
+      const mesh = new THREE.Mesh(
+        new THREE.SphereGeometry(radius, 16, 12),
+        new THREE.MeshBasicMaterial({ color: bodyColor("moon") })
+      );
+      mesh.position.set(
+        parentMesh.position.x + Math.cos(moonAngle) * moonOrbitRadius,
+        parentMesh.position.y,
+        parentMesh.position.z + Math.sin(moonAngle) * moonOrbitRadius
+      );
+      mesh.userData.body = moon;
+      mesh.userData.star = star;
+      scaleRoot.add(mesh);
+      bodyMeshes.push(mesh);
+      bodyMeshById.set(moon.id, mesh);
+      const label = makeTextSprite(moon.name, "#d5dce8", 16);
+      label.position.copy(mesh.position).add(new THREE.Vector3(0, radius + 0.25, 0));
+      scaleRoot.add(label);
+    } else {
+      const globalIdx = nonMoons.length + moonIdx;
+      const orbitRadius = scaledOrbit(moon, globalIdx);
+      if (orbitRadius > 0) {
+        const orbit = makeOrbit(orbitRadius, 0xd5dce8);
+        scaleRoot.add(orbit);
+      }
+      const angle = globalIdx * 1.78 + (star.id.length % 7);
+      const mesh = new THREE.Mesh(
+        new THREE.SphereGeometry(radius, 16, 12),
+        new THREE.MeshBasicMaterial({ color: bodyColor("moon") })
+      );
+      mesh.position.set(Math.cos(angle) * orbitRadius, 0, Math.sin(angle) * orbitRadius);
+      mesh.userData.body = moon;
+      mesh.userData.star = star;
+      scaleRoot.add(mesh);
+      bodyMeshes.push(mesh);
+      bodyMeshById.set(moon.id, mesh);
+      const label = makeTextSprite(moon.name, "#d5dce8", 16);
+      label.position.copy(mesh.position).add(new THREE.Vector3(0, radius + 0.25, 0));
+      scaleRoot.add(label);
+    }
+  });
+
   controls.target.copy(center);
-  const zoomDist = 1.2;
-  camera.position.set(center.x + zoomDist, center.y + zoomDist * 0.7, center.z + zoomDist);
+  const zoomDist = starRadius * 0.8;
+  camera.position.set(center.x + zoomDist, center.y + zoomDist * 0.6, center.z + zoomDist);
   showDetails(star);
   writeAgentOutput({ action: "openSystem", id: star.id, bodies: payload.bodies.length });
   return payload;
@@ -1654,6 +1764,20 @@ function setupInteraction() {
       const body = bodyHits[0].object.userData.body;
       const star = bodyHits[0].object.userData.star;
       try {
+        if (inSystemView) {
+          if (body.bodyType === "star") {
+            exitSystemView();
+            return;
+          }
+          const bodyWorldPos = new THREE.Vector3();
+          bodyHits[0].object.getWorldPosition(bodyWorldPos);
+          controls.target.copy(bodyWorldPos);
+          const offset = 0.06;
+          camera.position.set(bodyWorldPos.x + offset, bodyWorldPos.y + offset * 0.6, bodyWorldPos.z + offset);
+          showBodyDetails(body, star);
+          writeAgentOutput({ action: "zoomBody", star: star.id, body: body.id });
+          return;
+        }
         if (!activeSystemScaleRoot || selectedStar?.id !== star.id) {
           await openSystemView(star);
         }
