@@ -19,6 +19,8 @@
       <canvas id="map" aria-label="可旋转的太阳周边 50 光年三维恒星系地图"></canvas>
 
       <section class="panel panel-left" aria-label="地图控制">
+        <button id="toggleLeft" class="panel-toggle" type="button" title="隐藏/显示控制面板">◀</button>
+        <div class="panel-left-inner" id="panelLeftInner">
         <div class="mast">
           <p class="kicker">AD 2350 / 50 ly</p>
           <h1>人类文明星图</h1>
@@ -122,18 +124,17 @@
         </div>
 
         <div class="legend" id="legend" aria-label="势力图例"></div>
+        </div>
       </section>
 
       <section class="panel panel-right" aria-label="恒星系详情">
+        <button id="toggleRight" class="panel-toggle panel-toggle-right" type="button" title="隐藏/显示详情面板">✕</button>
         <div class="detail-head">
           <p class="kicker">选中恒星系</p>
           <h2 id="detailTitle">太阳 / Sol</h2>
         </div>
         <nav id="detailTabs" class="detail-tabs" aria-label="详情横向导航"></nav>
-        <div class="detail-body">
-          <nav id="detailSideNav" class="detail-side-nav" aria-label="详情纵向导航"></nav>
-          <div id="detailList" class="detail-list"></div>
-        </div>
+        <div id="detailList" class="detail-list"></div>
       </section>
 
       <div class="hud" aria-hidden="true">

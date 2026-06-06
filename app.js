@@ -6,7 +6,6 @@ const canvas = document.querySelector("#map");
 const detailTitle = document.querySelector("#detailTitle");
 const detailList = document.querySelector("#detailList");
 const detailTabs = document.querySelector("#detailTabs");
-const detailSideNav = document.querySelector("#detailSideNav");
 const detailFieldControls = document.querySelector("#detailFieldControls");
 const detailSelectAll = document.querySelector("#detailSelectAll");
 const detailSelectNone = document.querySelector("#detailSelectNone");
@@ -159,13 +158,10 @@ function renderDetailNav(groups) {
     return `<a href="#${id}" data-target="${id}">${group}</a>`;
   }).join("");
   if (detailTabs) detailTabs.innerHTML = links;
-  if (detailSideNav) detailSideNav.innerHTML = links;
-  [detailTabs, detailSideNav].forEach((nav) => {
-    nav?.querySelectorAll("a").forEach((link) => {
-      link.addEventListener("click", (event) => {
-        event.preventDefault();
-        document.querySelector(`#${link.dataset.target}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-      });
+  detailTabs?.querySelectorAll("a").forEach((link) => {
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      document.querySelector(`#${link.dataset.target}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
     });
   });
 }
@@ -706,8 +702,7 @@ function updateVisibility() {
     const mutedByHighlight = activeFaction !== "all" && !highlight && star.id !== "sol";
     
     if (inSystemView && systemViewStar && star.id === systemViewStar.id) {
-      star.mesh.material.transparent = true;
-      star.mesh.material.opacity = 0;
+      star.mesh.visible = false;
       star.halo.visible = false;
       if (star.label) star.label.visible = false;
       if (star.controlSphere) star.controlSphere.visible = false;
@@ -865,11 +860,10 @@ function zoomFaction(faction) {
 function clearSystemView() {
   if (systemViewStar) {
     const s = systemViewStar;
-    s.mesh.material.opacity = s.objectType === "diffuse_cloud" ? 0.22 : 1;
-    s.mesh.material.transparent = s.objectType === "diffuse_cloud";
-    if (s.halo) s.halo.visible = s.mesh.visible;
-    if (s.label) s.label.visible = s.mesh.visible && showLabels.checked;
-    if (s.controlSphere) s.controlSphere.visible = s.mesh.visible;
+    s.mesh.visible = true;
+    if (s.halo) s.halo.visible = true;
+    if (s.label) s.label.visible = showLabels.checked;
+    if (s.controlSphere) s.controlSphere.visible = true;
     systemViewStar = null;
   }
   bodyMeshes.length = 0;
@@ -878,6 +872,9 @@ function clearSystemView() {
   activeSystemScaleRoot = null;
   inSystemView = false;
   controls.minDistance = 0.5;
+  starLayer.visible = true;
+  labelLayer.visible = showLabels.checked;
+  territoryLayer.visible = showTerritories.checked;
 }
 
 function exitSystemView() {
@@ -894,7 +891,7 @@ function exitSystemView() {
 }
 
 function makeOrbit(radius, color = 0x8ca6c8) {
-  const material = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.42 });
+  const material = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.58 });
   return makeCircle(radius, 160, material);
 }
 
@@ -985,15 +982,14 @@ async function openSystemView(value = selectedStar?.id) {
   inSystemView = true;
   systemViewStar = star;
 
-  star.mesh.material.transparent = true;
-  star.mesh.material.opacity = 0;
+  star.mesh.visible = false;
   if (star.halo) star.halo.visible = false;
   if (star.label) star.label.visible = false;
   if (star.controlSphere) star.controlSphere.visible = false;
 
   const starRadius = getStarRadius(star) * Number(starScale.value);
   const maxOrbit = Math.max(1, ...payload.bodies.map((b, i) => scaledOrbit(b, i)));
-  const systemScale = Math.min(0.06, starRadius / maxOrbit);
+  const systemScale = Math.min(0.15, (starRadius * 1.8) / maxOrbit);
   scaleRoot.scale.setScalar(systemScale);
 
   controls.minDistance = 0.01;
@@ -1113,8 +1109,12 @@ async function openSystemView(value = selectedStar?.id) {
   });
 
   controls.target.copy(center);
-  const zoomDist = starRadius * 0.8;
-  camera.position.set(center.x + zoomDist, center.y + zoomDist * 0.6, center.z + zoomDist);
+  const systemExtent = maxOrbit * systemScale;
+  const zoomDist = systemExtent * 2.8;
+  camera.position.set(center.x, center.y + zoomDist * 0.92, center.z + zoomDist * 0.4);
+  starLayer.visible = false;
+  labelLayer.visible = false;
+  territoryLayer.visible = false;
   showDetails(star);
   writeAgentOutput({ action: "openSystem", id: star.id, bodies: payload.bodies.length });
   return payload;
@@ -1410,7 +1410,20 @@ function exposeAgentApi() {
 
 function bindUi() {
   const showQuadrantBounds = document.querySelector("#showQuadrantBounds");
-  
+
+  const panelLeft = document.querySelector(".panel-left");
+  const panelRight = document.querySelector(".panel-right");
+  const toggleLeft = document.querySelector("#toggleLeft");
+  const toggleRight = document.querySelector("#toggleRight");
+  toggleLeft?.addEventListener("click", () => {
+    panelLeft.classList.toggle("collapsed");
+    toggleLeft.textContent = panelLeft.classList.contains("collapsed") ? "▶" : "◀";
+  });
+  toggleRight?.addEventListener("click", () => {
+    panelRight.classList.toggle("collapsed");
+    toggleRight.textContent = panelRight.classList.contains("collapsed") ? "☰" : "✕";
+  });
+
   [showLabels, showTerritories, showOctants, showQuadrantBounds, showOuter, habitableOnly, objectTypeFilter, spectralFilter, factionTypeFilter].forEach((el) => {
     el.addEventListener("change", updateVisibility);
   });
