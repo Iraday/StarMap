@@ -623,8 +623,10 @@ function buildControls() {
     option.textContent = faction;
     factionFilter.appendChild(option);
 
-    const factionStarsList = stars.filter((star) => star.faction === faction);
-    const count = factionStarsList.length;
+    // Initial count uses all stars for this faction; updateLegendCounts() will
+    // correct it once filters are applied.
+    const allFactionStars = stars.filter((star) => star.faction === faction);
+    const count = allFactionStars.length;
     const row = document.createElement("button");
     row.type = "button";
     row.className = "legend-item";
@@ -639,7 +641,7 @@ function buildControls() {
       cycleBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         if (activeFaction !== faction) zoomFaction(faction);
-        const fStars = stars.filter((s) => s.faction === faction);
+        const fStars = stars.filter((s) => s.faction === faction && isGloballyVisible(s));
         if (!fStars.length) return;
         const idx = (factionCycleIndex.get(faction) || 0) % fStars.length;
         moveCameraToStar(fStars[idx], 8);
@@ -671,6 +673,61 @@ function buildControls() {
   });
 }
 
+// Returns true if a star passes the two global-toggle filters (outer ring
+// and habitable-only) plus the time-visibility gates. Used both by
+// updateVisibility() and updateLegendCounts() so they stay in sync.
+function isGloballyVisible(star) {
+  if (star.displayAfter > currentYear) return false;
+  if (star.displayUntil !== null && star.displayUntil !== undefined && star.displayUntil < currentYear) return false;
+  if (!showOuter.checked && star.status === "outer" && star.distance > INNER_RADIUS) return false;
+  if (habitableOnly.checked && star.id !== "sol" && star.habitable < 1) return false;
+  return true;
+}
+
+// Re-counts visible stars per faction in the legend and refreshes the count
+// badges + cycle lists so they respect the current filter state.
+function updateLegendCounts() {
+  legend.querySelectorAll(".legend-item").forEach((row) => {
+    const faction = row.dataset.faction;
+    if (!faction) return;
+    const visStars = stars.filter((s) => s.faction === faction && isGloballyVisible(s));
+    const count = visStars.length;
+    const countEl = row.querySelector(".legend-count");
+    const spanEl = row.querySelector("span:last-child:not(.swatch):not(.legend-count)");
+    if (count > 1) {
+      if (countEl) {
+        countEl.firstChild.textContent = count + " ";
+      } else {
+        // was showing plain count — upgrade to cycle button
+        const plain = spanEl;
+        if (plain) plain.remove();
+        const cycleSpan = document.createElement("span");
+        cycleSpan.className = "legend-count";
+        cycleSpan.innerHTML = `${count} <button class="cycle-btn" title="循环定位该势力恒星系">⟳</button>`;
+        cycleSpan.querySelector(".cycle-btn").addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (activeFaction !== faction) zoomFaction(faction);
+          const fStars = stars.filter((s) => s.faction === faction && isGloballyVisible(s));
+          if (!fStars.length) return;
+          const idx = (factionCycleIndex.get(faction) || 0) % fStars.length;
+          moveCameraToStar(fStars[idx], 8);
+          factionCycleIndex.set(faction, idx + 1);
+        });
+        row.appendChild(cycleSpan);
+      }
+    } else {
+      if (countEl) {
+        // downgrade to plain span
+        const newSpan = document.createElement("span");
+        newSpan.textContent = String(count);
+        countEl.replaceWith(newSpan);
+      } else if (spanEl) {
+        spanEl.textContent = String(count);
+      }
+    }
+  });
+}
+
 function updateVisibility() {
   const faction = factionFilter.value;
   const text = normalizeSearch(searchFilter.value);
@@ -690,10 +747,7 @@ function updateVisibility() {
     if (spectral !== "all") visible = visible && String(star.spectralClass).includes(spectral);
     if (factionType !== "all") visible = visible && star.factionType === factionType;
     if (star.planetCount < minPlanetCount) visible = false;
-    if (star.displayAfter > currentYear) visible = false;
-    if (star.displayUntil !== null && star.displayUntil !== undefined && star.displayUntil < currentYear) visible = false;
-    if (!showOuter.checked && star.status === "outer" && star.distance > INNER_RADIUS) visible = false;
-    if (habitableOnly.checked && star.id !== "sol" && star.habitable < 1) visible = false;
+    if (!isGloballyVisible(star)) visible = false;
     star.mesh.visible = visible;
     star.halo.visible = visible;
     if (star.controlSphere) star.controlSphere.visible = visible;
@@ -727,6 +781,7 @@ function updateVisibility() {
   legend.querySelectorAll(".legend-item").forEach((row) => {
     row.classList.toggle("active", activeFaction !== "all" && row.dataset.faction === activeFaction);
   });
+  updateLegendCounts();
 }
 
 function updateScale() {
