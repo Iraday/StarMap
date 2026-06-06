@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>2350 年人类文明太阳周边星图</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <main id="app" aria-label="2350 年人类文明 3D 星图">
+      <canvas id="map" aria-label="可旋转的太阳周边三维恒星系地图"></canvas>
+
+      <section class="panel panel-left" aria-label="地图控制">
+        <div class="mast">
+          <p class="kicker">AD 2350 / 25 ly</p>
+          <h1>人类文明星图</h1>
+          <p class="subline">银河坐标：X+ 银心，Y+ 银河自旋方向，Z+ 北银极</p>
+        </div>
+
+        <div class="control-block">
+          <label for="factionFilter">势力</label>
+          <select id="factionFilter">
+            <option value="all">全部势力</option>
+          </select>
+        </div>
+
+        <div class="control-grid">
+          <button id="resetView" type="button">重置视角</button>
+          <button id="topView" type="button">北银极视角</button>
+          <button id="planeView" type="button">银河平面</button>
+          <button id="spinToggle" type="button" aria-pressed="false">自动旋转</button>
+        </div>
+
+        <div class="switches" aria-label="图层开关">
+          <label><input id="showLabels" type="checkbox" checked /> 名称</label>
+          <label><input id="showTerritories" type="checkbox" checked /> 势力连线</label>
+          <label><input id="showOctants" type="checkbox" checked /> 八象限</label>
+          <label><input id="showOuter" type="checkbox" checked /> 边界外环</label>
+          <label><input id="habitableOnly" type="checkbox" /> 只看宜居/准宜居</label>
+        </div>
+
+        <div class="control-block">
+          <label for="starScale">星点尺寸</label>
+          <input id="starScale" type="range" min="0.7" max="1.9" value="1.1" step="0.05" />
+        </div>
+
+        <div class="agent-tools" aria-label="Agent 接口快捷操作">
+          <label for="agentStar">Agent 接口</label>
+          <input id="agentStar" type="text" list="starNames" placeholder="gj1002 / Teegarden / 李-哈特曼" />
+          <div class="control-grid">
+            <button id="zoomStar" type="button">Zoom 到恒星系</button>
+            <button id="nearestStar" type="button">最近恒星系</button>
+          </div>
+          <div class="distance-row">
+            <input id="distanceFrom" type="text" list="starNames" placeholder="from" />
+            <input id="distanceTo" type="text" list="starNames" placeholder="to" />
+          </div>
+          <button id="calcDistance" type="button">计算距离</button>
+          <pre id="agentOutput" aria-live="polite"></pre>
+          <datalist id="starNames"></datalist>
+        </div>
+
+        <div class="legend" id="legend" aria-label="势力图例"></div>
+      </section>
+
+      <section class="panel panel-right" aria-label="恒星系详情">
+        <div class="detail-head">
+          <p class="kicker">选中恒星系</p>
+          <h2 id="detailTitle">太阳 / Sol</h2>
+        </div>
+        <dl id="detailList"></dl>
+      </section>
+
+      <div class="hud" aria-hidden="true">
+        <span><b>X+</b> 银心</span>
+        <span><b>Y+</b> 银河自旋方向</span>
+        <span><b>Z+</b> 北银极</span>
+      </div>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
