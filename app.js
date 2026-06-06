@@ -692,7 +692,7 @@ function updateVisibility() {
     if (star.planetCount < minPlanetCount) visible = false;
     if (star.displayAfter > currentYear) visible = false;
     if (star.displayUntil !== null && star.displayUntil !== undefined && star.displayUntil < currentYear) visible = false;
-    if (!showOuter.checked && star.status === "outer") visible = false;
+    if (!showOuter.checked && star.status === "outer" && star.distance > INNER_RADIUS) visible = false;
     if (habitableOnly.checked && star.id !== "sol" && star.habitable < 1) visible = false;
     star.mesh.visible = visible;
     star.halo.visible = visible;
