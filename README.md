@@ -53,9 +53,11 @@ http://127.0.0.1:8765/
 - 如果双击恒星后只有自动生成的占位天体，镜头只会拉近主星；有正式内部结构种子的恒星系会展开缩小主星、行星轨道、卫星和小行星带。双击内部行星/卫星会保持或打开内部结构并选中该天体。
 - Agent 控制台通过下拉菜单选择显示，支持 zoom、距离计算、最近邻、筛选和内部结构查询。
 - 时间默认 `1秒/秒`，空格键暂停/继续；时间面板可用预设或自定义 `年/月/日/时/分/秒` 组合流速。
-- 舰队面板支持舰级选择、部署/建造、选中舰船、跟随、定位和进入相关星系；不同舰级使用不同 3D 形状和短码图标。
-- 选中舰船或小行星后，在星图或星系内部视图中双击右键可下达航行命令；点恒星飞向恒星，点内部天体飞向该天体，点空处飞向当前视平面坐标。
-- 保存/读取面板可保存镜头、筛选项、时间流、当前选中对象、星系视图和舰船状态；保存文件写入 `saves/`，实际 JSON 保存档被 git 忽略。
+- 舰船控制面板有“舰船 / 舰队 / 命令”页签，支持势力和舰级筛选、相机跟随、框选多舰、自动编队、舰队成员循环定位和舰队构成查看；舰船、星港、空间站、巨构、小行星等使用不同符号图标和 3D 形状。
+- 选中舰船或小行星后，在星图或星系内部视图中双击右键可下达航行命令；点恒星飞向恒星，点内部天体飞向该天体，点空处飞向当前视平面坐标。预定航线以带箭头虚线显示，单击航线可选中对应舰船。
+- 命令页可切换“右键移动 / 右键入轨”。入轨支持预设半径/速度，也支持鼠标调整：左键目标天体上下拖动调半径，松开后再拖动一次调速度，完成后生成可点击虚线轨道。
+- 右上角齿轮可管理 UI 显示；保存/读取默认隐藏，可从齿轮中打开。鼠标模式小面板可切换左键“旋转”或“框选”，默认保持旋转；键位面板可自定义前后左右上下移动键。
+- 保存/读取面板可保存镜头、筛选项、时间流、当前选中对象、星系视图、舰船状态、舰队数据、UI 显示状态、UI 位置和键位映射；保存文件写入 `saves/`，实际 JSON 保存档被 git 忽略。
 
 ## 数据口径
 
@@ -89,6 +91,12 @@ StarMapAgent.listSaves()
 const ship = StarMapAgent.deployShip({ name: "晨线-01", shipClass: "explorer", locationStarId: "sol" })
 StarMapAgent.moveShip(ship.id, "gj1002")
 StarMapAgent.moveShipToPoint(ship.id, [1, 0, 2], { label: "自由航点" })
+StarMapAgent.createFleet([ship.id, "ship-2"], "第一探索群")
+StarMapAgent.moveFleet("fleet-1", "gj1002")
+StarMapAgent.orbitShips(["ship-1", "ship-2"], [0, 0, 0], { radiusLy: 0.0003, periodDays: 180 })
+StarMapAgent.setUiVisibility({ saveLoad: true, mouseMode: true, keyboard: true })
+StarMapAgent.setLeftClickMode("box")
+StarMapAgent.setKeyboardMapping({ forward: "w", backward: "s", left: "a", right: "d", up: "q", down: "e" })
 StarMapAgent.addAsteroid({ name: "测试小行星", locationStarId: "sol", destinationStarId: "alpha" })
 await StarMapAgent.addStar({ id: "test", name: "Test" }) // 调用后端创建恒星
 await StarMapAgent.updateStar({ id: "test", habitable: 1 }) // 调用后端更新恒星

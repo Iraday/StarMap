@@ -26,8 +26,36 @@
     <main id="app" aria-label="2350 年人类文明 50 光年 3D 星图">
       <canvas id="map" aria-label="可旋转的太阳周边 50 光年三维恒星系地图"></canvas>
 
+      <button id="uiCogButton" class="ui-cog-button" type="button" title="界面显示">⚙</button>
+      <section id="uiManagerPanel" class="ui-manager-panel" style="display:none" aria-label="界面显示管理">
+        <div class="ui-manager-header">
+          <span>界面</span>
+          <button id="uiManagerClose" class="panel-hide" type="button" title="隐藏">×</button>
+        </div>
+        <select id="uiDisplaySelect" multiple aria-label="选择要显示的界面"></select>
+      </section>
+
+      <section id="mouseModePanel" class="tiny-panel mouse-mode-panel" style="display:none" aria-label="鼠标左键行为">
+        <div class="tiny-panel-header">
+          <span>左键</span>
+          <button class="panel-hide" data-hide-panel="mouseMode" type="button" title="隐藏">×</button>
+        </div>
+        <div class="mouse-mode-buttons">
+          <button class="left-mode active" data-left-mode="rotate" type="button">旋转</button>
+          <button class="left-mode" data-left-mode="box" type="button">框选</button>
+        </div>
+      </section>
+
+      <section id="keyboardPanel" class="tiny-panel keyboard-panel" style="display:none" aria-label="键位映射">
+        <div class="tiny-panel-header">
+          <span>键位</span>
+          <button class="panel-hide" data-hide-panel="keyboard" type="button" title="隐藏">×</button>
+        </div>
+        <div id="keyboardBindings" class="keyboard-bindings"></div>
+      </section>
+
       <section class="panel panel-left" aria-label="地图控制">
-        <button id="toggleLeft" class="panel-toggle" type="button" title="隐藏/显示控制面板">◀</button>
+        <button id="toggleLeft" class="panel-toggle panel-hide" type="button" title="隐藏/显示控制面板">×</button>
         <div class="panel-left-inner" id="panelLeftInner">
         <div class="mast">
           <p class="kicker">AD 2350 / 50 ly</p>
@@ -140,6 +168,7 @@
           </div>
           <pre id="agentOutput" aria-live="polite" style="display: none;"></pre>
           <datalist id="starNames"></datalist>
+          <datalist id="navObjectNames"></datalist>
         </div>
 
         <div class="legend" id="legend" aria-label="势力图例"></div>
@@ -147,7 +176,7 @@
       </section>
 
       <section class="panel panel-right" aria-label="恒星系详情">
-        <button id="toggleRight" class="panel-toggle panel-toggle-right" type="button" title="隐藏/显示详情面板">✕</button>
+        <button id="toggleRight" class="panel-toggle panel-toggle-right panel-hide" type="button" title="隐藏/显示详情面板">×</button>
         <div class="detail-head">
           <p class="kicker">选中恒星系</p>
           <h2 id="detailTitle">太阳 / Sol</h2>
@@ -164,22 +193,66 @@
 
       <!-- Fleet management panel (bottom-left floating) -->
       <div id="fleetPanel" class="fleet-panel" aria-label="舰队管理">
-        <button id="fleetPanelToggle" class="fleet-panel-toggle" type="button" title="舰队管理">FLT</button>
+        <button id="fleetPanelToggle" class="fleet-panel-toggle panel-hide" type="button" title="舰队管理">×</button>
         <div class="fleet-panel-inner">
-          <div class="fleet-panel-header">舰队总览</div>
-          <div id="shipClassPalette" class="ship-class-palette" aria-label="舰级选择"></div>
-          <div class="ship-control-grid" aria-label="舰船控制">
-            <input id="shipNameInput" type="text" placeholder="舰名" />
-            <select id="shipClassSelect" title="舰级"></select>
-            <input id="shipLocationInput" type="text" list="starNames" placeholder="起点恒星系" />
-            <div class="ship-control-buttons">
-              <button id="deployShipBtn" type="button">部署</button>
-              <button id="buildShipBtn" type="button">建造</button>
-            </div>
-            <input id="shipDestinationInput" type="text" list="starNames" placeholder="目的地恒星系" />
-            <button id="moveShipBtn" type="button">航行</button>
+          <div class="fleet-panel-header">
+            <span>舰船控制</span>
+            <span id="shipSelectionCount" class="fleet-panel-count">0</span>
           </div>
-          <div id="fleetCategories" class="fleet-categories"></div>
+          <div class="fleet-tabs" role="tablist" aria-label="舰船页签">
+            <button class="fleet-tab active" data-fleet-tab="ships" type="button">舰船</button>
+            <button class="fleet-tab" data-fleet-tab="fleets" type="button">舰队</button>
+            <button class="fleet-tab" data-fleet-tab="commands" type="button">命令</button>
+          </div>
+          <section id="shipTabShips" class="fleet-tab-panel active" aria-label="所有舰船">
+            <div class="ship-filter-row">
+              <select id="shipFactionFilter" multiple title="按势力筛选"></select>
+              <select id="shipTypeFilter" title="按舰船类型筛选">
+                <option value="all">全部类型</option>
+              </select>
+            </div>
+            <div id="shipList" class="ship-list"></div>
+          </section>
+          <section id="shipTabFleets" class="fleet-tab-panel" aria-label="舰队">
+            <div class="ship-control-buttons">
+              <button id="createFleetBtn" type="button">编队</button>
+              <button id="cycleFleetShipBtn" type="button">循环舰船</button>
+            </div>
+            <div id="fleetList" class="fleet-list"></div>
+          </section>
+          <section id="shipTabCommands" class="fleet-tab-panel" aria-label="舰船命令">
+            <div id="shipClassPalette" class="ship-class-palette" aria-label="舰级选择"></div>
+            <div class="ship-control-grid" aria-label="舰船控制">
+              <input id="shipNameInput" type="text" placeholder="舰名" />
+              <select id="shipClassSelect" title="舰级"></select>
+              <input id="shipLocationInput" type="text" list="navObjectNames" placeholder="起点恒星/天体/舰船" />
+              <input id="shipFactionInput" type="text" list="shipFactionNames" placeholder="所属势力，留空则跟随起点" />
+              <datalist id="shipFactionNames"></datalist>
+              <div class="ship-control-buttons">
+                <button id="deployShipBtn" type="button">部署</button>
+                <button id="buildShipBtn" type="button">建造</button>
+              </div>
+              <input id="shipDestinationInput" type="text" list="navObjectNames" placeholder="目的地恒星/天体/舰船" />
+              <button id="moveShipBtn" type="button">航行</button>
+              <div class="command-mode-row" aria-label="右键命令模式">
+                <button class="command-mode active" data-command-mode="move" type="button">右键移动</button>
+                <button class="command-mode" data-command-mode="orbit" type="button">右键入轨</button>
+              </div>
+              <label class="ship-command-toggle"><input id="orbitMouseAdjustToggle" type="checkbox" checked /> 鼠标调整入轨</label>
+              <div class="orbit-command-panel">
+                <input id="shipOrbitRadiusInput" type="number" min="0.000001" step="0.00001" value="0.0003" title="轨道半径 ly" />
+                <span>ly 半径</span>
+                <input id="shipOrbitSpeedInput" type="number" min="0" step="0.000001" value="0.00001" title="轨道速度 c；0 表示使用周期" />
+                <span>c 速度</span>
+                <input id="shipOrbitYears" type="number" min="0" step="1" value="0" title="年" /><span>年</span>
+                <input id="shipOrbitMonths" type="number" min="0" step="1" value="0" title="月" /><span>月</span>
+                <input id="shipOrbitDays" type="number" min="0" step="1" value="180" title="日" /><span>日</span>
+                <input id="shipOrbitHours" type="number" min="0" step="1" value="0" title="时" /><span>时</span>
+                <input id="shipOrbitMinutes" type="number" min="0" step="1" value="0" title="分" /><span>分</span>
+                <input id="shipOrbitSeconds" type="number" min="0" step="1" value="0" title="秒" /><span>秒</span>
+              </div>
+            </div>
+          </section>
         </div>
       </div>
 
@@ -187,7 +260,7 @@
       <div id="shipInfoPanel" class="ship-info-panel" style="display:none" aria-label="舰船信息">
         <div class="ship-info-header">
           <span id="shipInfoTitle" class="ship-info-title">舰船信息</span>
-          <button id="shipInfoClose" class="ship-info-close" type="button" title="关闭">✕</button>
+          <button id="shipInfoClose" class="ship-info-close panel-hide" type="button" title="关闭">×</button>
         </div>
         <div id="shipInfoContent" class="ship-info-content"></div>
         <div class="ship-info-progress-wrap" id="shipProgressWrap" style="display:none">
@@ -197,13 +270,14 @@
         <div class="ship-info-actions">
           <button id="shipFollowBtn" type="button" title="跟随">跟随</button>
           <button id="shipZoomBtn" type="button" title="定位">定位</button>
+          <button id="shipCycleBtn" type="button" title="循环舰队舰船">循环</button>
           <button id="shipSystemBtn" type="button" title="进入星系">星系</button>
         </div>
       </div>
 
       <!-- Floating time control HUD (top-right) -->
       <div id="timeHud" class="time-hud" aria-label="时间控制">
-        <button id="timeHudToggle" class="time-hud-toggle" type="button" title="隐藏/显示时间面板">TIME</button>
+        <button id="timeHudToggle" class="time-hud-toggle panel-hide" type="button" title="隐藏/显示时间面板">×</button>
         <div class="time-hud-inner">
           <div class="time-hud-row">
             <span class="time-label">已过:</span>
@@ -233,7 +307,7 @@
             <input id="timeSeconds" type="number" min="0" step="1" value="0" title="秒" /><span>秒</span>
             <button id="timeCustomApply" type="button">应用</button>
           </div>
-          <div class="save-control" aria-label="保存读取">
+          <div class="save-control ui-save-load" aria-label="保存读取" style="display:none">
             <input id="saveNameInput" type="text" placeholder="保存名" />
             <select id="saveSelect" title="已有保存"></select>
             <div class="save-buttons">

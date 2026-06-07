@@ -4,30 +4,33 @@
  */
 
 export const shipCategories = {
-  starbase: { label: "星港", order: 0 },
+  starbase: { label: "星港与巨构", order: 0 },
   military: { label: "军事舰队", order: 1 },
   civilian: { label: "民用舰船", order: 2 },
   support: { label: "辅助单位", order: 3 },
-  asteroid: { label: "小行星", order: 4 },
+  asteroid: { label: "小行星/彗星", order: 4 },
 };
 
 export const shipClasses = {
-  satellite: { label: "卫星", icon: "SAT", category: "support", buildDays: 30, maxSpeed: 0.0001, ftl: false, crew: 0, mass: 0.5 },
-  shuttle: { label: "穿梭机", icon: "SH", category: "civilian", buildDays: 60, maxSpeed: 0.001, ftl: false, crew: 4, mass: 20 },
-  construction: { label: "工程船", icon: "ENG", category: "civilian", buildDays: 200, maxSpeed: 0.15, ftl: true, crew: 50, mass: 15000 },
-  science: { label: "科研舰", icon: "SCI", category: "civilian", buildDays: 350, maxSpeed: 0.40, ftl: true, crew: 40, mass: 4000 },
-  corvette: { label: "护卫艇", icon: "CVT", category: "military", buildDays: 180, maxSpeed: 0.05, ftl: false, crew: 15, mass: 800 },
-  frigate: { label: "巡防舰", icon: "FF", category: "military", buildDays: 365, maxSpeed: 0.15, ftl: true, crew: 80, mass: 5000 },
-  destroyer: { label: "驱逐舰", icon: "DD", category: "military", buildDays: 540, maxSpeed: 0.25, ftl: true, crew: 200, mass: 12000 },
-  cruiser: { label: "巡洋舰", icon: "CA", category: "military", buildDays: 730, maxSpeed: 0.35, ftl: true, crew: 500, mass: 45000 },
-  battleship: { label: "战列舰", icon: "BB", category: "military", buildDays: 1095, maxSpeed: 0.40, ftl: true, crew: 1200, mass: 120000 },
-  carrier: { label: "航母", icon: "CVN", category: "military", buildDays: 1460, maxSpeed: 0.30, ftl: true, crew: 3000, mass: 250000 },
-  freighter: { label: "货船", icon: "FR", category: "civilian", buildDays: 300, maxSpeed: 0.20, ftl: true, crew: 25, mass: 80000 },
-  explorer: { label: "探索舰", icon: "EX", category: "civilian", buildDays: 400, maxSpeed: 0.50, ftl: true, crew: 30, mass: 6000 },
-  colony_ship: { label: "殖民船", icon: "COL", category: "civilian", buildDays: 1825, maxSpeed: 0.10, ftl: true, crew: 5000, mass: 500000 },
-  starbase: { label: "星港", icon: "SB", category: "starbase", buildDays: 2000, maxSpeed: 0, ftl: false, crew: 8000, mass: 2000000 },
-  defense_platform: { label: "防御平台", icon: "DP", category: "starbase", buildDays: 600, maxSpeed: 0, ftl: false, crew: 50, mass: 50000 },
-  asteroid: { label: "小行星", icon: "AST", category: "asteroid", buildDays: 0, maxSpeed: 0.001, ftl: false, crew: 0, mass: 10000 },
+  satellite: { label: "卫星", icon: "◇", category: "support", buildDays: 30, maxSpeed: 0.0001, ftl: false, crew: 0, mass: 0.5 },
+  shuttle: { label: "穿梭机", icon: "△", category: "civilian", buildDays: 60, maxSpeed: 0.001, ftl: false, crew: 4, mass: 20 },
+  construction: { label: "工程船", icon: "▣", category: "civilian", buildDays: 200, maxSpeed: 0.15, ftl: true, crew: 50, mass: 15000 },
+  science: { label: "科研舰", icon: "✦", category: "civilian", buildDays: 350, maxSpeed: 0.40, ftl: true, crew: 40, mass: 4000 },
+  corvette: { label: "护卫艇", icon: "▲", category: "military", buildDays: 180, maxSpeed: 0.05, ftl: false, crew: 15, mass: 800 },
+  frigate: { label: "巡防舰", icon: "◆", category: "military", buildDays: 365, maxSpeed: 0.15, ftl: true, crew: 80, mass: 5000 },
+  destroyer: { label: "驱逐舰", icon: "⬟", category: "military", buildDays: 540, maxSpeed: 0.25, ftl: true, crew: 200, mass: 12000 },
+  cruiser: { label: "巡洋舰", icon: "⬢", category: "military", buildDays: 730, maxSpeed: 0.35, ftl: true, crew: 500, mass: 45000 },
+  battleship: { label: "战列舰", icon: "✹", category: "military", buildDays: 1095, maxSpeed: 0.40, ftl: true, crew: 1200, mass: 120000 },
+  carrier: { label: "航母", icon: "▰", category: "military", buildDays: 1460, maxSpeed: 0.30, ftl: true, crew: 3000, mass: 250000 },
+  freighter: { label: "货船", icon: "▤", category: "civilian", buildDays: 300, maxSpeed: 0.20, ftl: true, crew: 25, mass: 80000 },
+  explorer: { label: "探索舰", icon: "✧", category: "civilian", buildDays: 400, maxSpeed: 0.50, ftl: true, crew: 30, mass: 6000 },
+  colony_ship: { label: "殖民船", icon: "◍", category: "civilian", buildDays: 1825, maxSpeed: 0.10, ftl: true, crew: 5000, mass: 500000 },
+  shipyard: { label: "造船厂", icon: "▦", category: "starbase", buildDays: 1600, maxSpeed: 0, ftl: false, crew: 5000, mass: 1500000 },
+  starbase: { label: "星港", icon: "◎", category: "starbase", buildDays: 2000, maxSpeed: 0, ftl: false, crew: 8000, mass: 2000000 },
+  station: { label: "空间站", icon: "◉", category: "starbase", buildDays: 900, maxSpeed: 0, ftl: false, crew: 1200, mass: 380000 },
+  defense_platform: { label: "防御平台", icon: "✚", category: "starbase", buildDays: 600, maxSpeed: 0, ftl: false, crew: 50, mass: 50000 },
+  megastructure: { label: "巨构", icon: "◈", category: "starbase", buildDays: 5000, maxSpeed: 0, ftl: false, crew: 20000, mass: 10000000 },
+  asteroid: { label: "小行星", icon: "☄", category: "asteroid", buildDays: 0, maxSpeed: 0.001, ftl: false, crew: 0, mass: 10000 },
 };
 
 let nextShipId = 1;
@@ -61,6 +64,50 @@ function distancePoints(a, b) {
   const pa = clonePoint(a);
   const pb = clonePoint(b);
   return Math.hypot(pa[0] - pb[0], pa[1] - pb[1], pa[2] - pb[2]);
+}
+
+function cloneOrbit(orbit) {
+  if (!orbit) return null;
+  return {
+    centerPoint: clonePoint(orbit.centerPoint),
+    radiusLy: Number(orbit.radiusLy || 0),
+    periodDays: Number(orbit.periodDays || 1),
+    startAngle: Number(orbit.startAngle || 0),
+    startDay: Number(orbit.startDay || 0),
+    direction: orbit.direction === -1 ? -1 : 1,
+    targetLabel: orbit.targetLabel || "轨道中心",
+    targetStarId: orbit.targetStarId || null,
+    targetBodyId: orbit.targetBodyId || null,
+  };
+}
+
+function makeOrbit(centerPoint, opts = {}) {
+  const radiusLy = Math.max(Number(opts.radiusLy ?? opts.orbitRadiusLy ?? 0.0001), 0.000001);
+  const periodDays = Math.max(Number(opts.periodDays ?? opts.orbitPeriodDays ?? 30), 0.000001);
+  return {
+    centerPoint: clonePoint(centerPoint),
+    radiusLy,
+    periodDays,
+    startAngle: Number(opts.startAngle ?? 0),
+    startDay: Number(opts.startDay ?? 0),
+    direction: opts.direction === -1 ? -1 : 1,
+    targetLabel: opts.targetLabel || opts.destinationLabel || "轨道中心",
+    targetStarId: opts.targetStarId || opts.destinationStarId || null,
+    targetBodyId: opts.targetBodyId || opts.destinationBodyId || null,
+  };
+}
+
+function orbitPoint(orbit, currentSimDay) {
+  const center = clonePoint(orbit.centerPoint);
+  if (!center) return null;
+  const elapsed = Math.max(0, Number(currentSimDay || 0) - Number(orbit.startDay || 0));
+  const angle = Number(orbit.startAngle || 0)
+    + orbit.direction * (Math.PI * 2) * (elapsed / Math.max(Number(orbit.periodDays || 1), 0.000001));
+  return [
+    center[0] + Math.cos(angle) * orbit.radiusLy,
+    center[1],
+    center[2] + Math.sin(angle) * orbit.radiusLy,
+  ];
 }
 
 function numericIdSuffix(id) {
@@ -102,6 +149,8 @@ function hydrateShip(record) {
     travelDistanceLy: Number(record.travelDistanceLy || 0),
     crewProperTimeDays: Number(record.crewProperTimeDays || 0),
     crewTotalProperDays: Number(record.crewTotalProperDays || 0),
+    pendingOrbit: cloneOrbit(record.pendingOrbit),
+    orbit: cloneOrbit(record.orbit),
     mesh: null,
     label: null,
     trail: null,
@@ -181,6 +230,8 @@ function startTravel(ship, currentSimDay, destination, opts = {}) {
   ship.travelProgressFrac = 0;
   ship.crewProperTimeDays = times.properTimeDays;
   ship.travelSpeed = speed;
+  ship.orbit = null;
+  ship.pendingOrbit = null;
   return ship;
 }
 
@@ -220,6 +271,25 @@ export function commandTravelToPoint(shipId, destinationPoint, currentSimDay, op
   }, { ...opts, fromPoint, distanceLy });
 }
 
+export function commandOrbitAroundPoint(shipId, centerPoint, currentSimDay, opts = {}) {
+  const ship = ships.find((s) => s.id === shipId);
+  if (!ship) throw new Error(`Ship not found: ${shipId}`);
+  const orbit = makeOrbit(centerPoint, { ...opts, startDay: currentSimDay });
+  const stagingPoint = orbitPoint({ ...orbit, startDay: currentSimDay }, currentSimDay);
+  const fromPoint = clonePoint(opts.fromPoint || ship.locationPoint);
+  const distanceLy = Math.max(Number(opts.distanceLy || distancePoints(fromPoint, stagingPoint)), 0.000001);
+  const moved = commandTravelToPoint(shipId, stagingPoint, currentSimDay, {
+    ...opts,
+    fromPoint,
+    distanceLy,
+    destinationStarId: orbit.targetStarId,
+    destinationBodyId: orbit.targetBodyId,
+    destinationLabel: `${orbit.targetLabel} 轨道`,
+  });
+  moved.pendingOrbit = orbit;
+  return moved;
+}
+
 export function tickShips(currentSimDay) {
   const events = [];
   for (const ship of ships) {
@@ -247,8 +317,16 @@ export function tickShips(currentSimDay) {
         ship.destinationLabel = "";
         ship.destinationKeepsPoint = false;
         ship.travelFromPoint = null;
+        if (ship.pendingOrbit) {
+          ship.orbit = { ...cloneOrbit(ship.pendingOrbit), startDay: currentSimDay };
+          ship.pendingOrbit = null;
+          ship.locationPoint = orbitPoint(ship.orbit, currentSimDay);
+          events.push({ type: "orbit", ship });
+        }
         events.push({ type: "arrived", ship });
       }
+    } else if (ship.state === "idle" && ship.orbit) {
+      ship.locationPoint = orbitPoint(ship.orbit, currentSimDay);
     }
   }
   return events;
@@ -288,7 +366,9 @@ export function listShips(filter = {}) {
 
 export function shipInfo(ship) {
   const cls = ship.classInfo;
-  const location = ship.locationStarId || (ship.locationPoint ? "自由坐标" : "未知");
+  const location = ship.orbit?.targetLabel
+    ? `环绕 ${ship.orbit.targetLabel}`
+    : ship.locationStarId || (ship.locationPoint ? "自由坐标" : "未知");
   const destination = ship.destinationStarId || ship.destinationLabel || (ship.destinationPoint ? "自由坐标" : "");
   const info = {
     id: ship.id,
@@ -310,6 +390,20 @@ export function shipInfo(ship) {
     ftl: cls.ftl,
     travelSpeed: `${ship.travelSpeed} c`,
   };
+  if (ship.pendingOrbit) {
+    info.pendingOrbit = {
+      targetLabel: ship.pendingOrbit.targetLabel,
+      radiusLy: ship.pendingOrbit.radiusLy,
+      periodDays: ship.pendingOrbit.periodDays,
+    };
+  }
+  if (ship.orbit) {
+    info.orbit = {
+      targetLabel: ship.orbit.targetLabel,
+      radiusLy: ship.orbit.radiusLy,
+      periodDays: ship.orbit.periodDays,
+    };
+  }
   if (ship.state === "building") {
     info.buildProgress = `${(ship.buildProgressFrac * 100).toFixed(1)}%`;
     info.buildEtaDays = Math.max(0, ship.buildDurationDays * (1 - ship.buildProgressFrac));

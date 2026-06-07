@@ -702,7 +702,7 @@ def api_docs() -> dict:
             "GET /api/zoom-target?star=gj1002": "Return target/camera coordinates for agent-driven zoom.",
             "GET /api/saves": "List saved map states from the git-ignored saves folder.",
             "GET /api/saves?name=my-save": "Load one saved map state. Incompatible schema versions return 409 with details.",
-            "POST /api/saves": "Save map view, controls, time, selected objects, and ships into saves/<name>.json.",
+            "POST /api/saves": "Save map view, controls, time, selected objects, ships, fleets, UI visibility, UI locations, and input mappings into saves/<name>.json.",
             "POST|PUT|PATCH /api/stars": "Add, replace, or partially update a star record. New records need the required star schema; existing records can send only id plus changed fields.",
             "POST|PUT|PATCH /api/system-bodies": "Add, replace, or partially update a clickable body inside a star system. New records need id, starId, name, and bodyType; existing records can send only id plus changed fields.",
         },
