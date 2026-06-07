@@ -30,6 +30,8 @@ const factionTypeFilter = document.querySelector("#factionTypeFilter");
 const minPlanets = document.querySelector("#minPlanets");
 const yearSlider = document.querySelector("#yearSlider");
 const yearLabel = document.querySelector("#yearLabel");
+const skyRadius = document.querySelector("#skyRadius");
+const skyRadiusLabel = document.querySelector("#skyRadiusLabel");
 
 const MAP_RADIUS = 50;
 const INNER_RADIUS = 25;
@@ -780,12 +782,19 @@ function updateVisibility() {
         if (star.label) star.label.visible = false;
         if (star.controlSphere) star.controlSphere.visible = false;
       } else {
+        const skyR = Number(skyRadius.value);
+        const dist = localDistance(systemViewStar, star);
+        const inSky = skyR > 0 && dist <= skyR;
+        star.mesh.visible = visible && inSky;
         star.mesh.scale.setScalar(0.06);
         star.mesh.material.opacity = 0.5;
         star.mesh.material.transparent = true;
         star.halo.visible = false;
         if (star.controlSphere) star.controlSphere.visible = false;
-        if (star.label) star.label.material.opacity = 0.4;
+        if (star.label) {
+          star.label.visible = visible && inSky && showLabels.checked;
+          star.label.material.opacity = 0.4;
+        }
       }
     } else {
       star.mesh.material.opacity = mutedByHighlight ? 0.18 : (star.objectType === "diffuse_cloud" ? 0.22 : 1);
@@ -1373,15 +1382,19 @@ async function openSystemView(value = selectedStar?.id) {
   const systemExtent = maxOrbit * systemScale;
   const zoomDist = systemExtent * 2.8;
   camera.position.set(center.x, center.y + zoomDist * 0.92, center.z + zoomDist * 0.4);
+  const skyR = Number(skyRadius.value);
   stars.forEach((s) => {
     if (s.id === star.id) return;
+    const dist = localDistance(star, s);
+    const inSky = skyR > 0 && dist <= skyR;
+    s.mesh.visible = inSky && s.mesh.visible;
     s.mesh.scale.setScalar(0.06);
     s.mesh.material.opacity = 0.5;
     s.mesh.material.transparent = true;
     if (s.halo) s.halo.visible = false;
     if (s.controlSphere) s.controlSphere.visible = false;
     if (s.label) {
-      s.label.visible = showLabels.checked;
+      s.label.visible = inSky && showLabels.checked;
       s.label.material.opacity = 0.4;
     }
   });
@@ -1706,6 +1719,10 @@ function bindUi() {
   minPlanets.addEventListener("input", updateVisibility);
   yearSlider.addEventListener("input", updateVisibility);
   starScale.addEventListener("input", updateScale);
+  skyRadius.addEventListener("input", () => {
+    skyRadiusLabel.textContent = skyRadius.value;
+    if (inSystemView) updateVisibility();
+  });
   detailSelectAll?.addEventListener("click", () => setAllDetailGroups(true));
   detailSelectNone?.addEventListener("click", () => setAllDetailGroups(false));
 
