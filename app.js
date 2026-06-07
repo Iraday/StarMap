@@ -1065,6 +1065,7 @@ async function openSystemView(value = selectedStar?.id) {
   const maxOrbit = Math.max(1, ...payload.bodies.map((b, i) => scaledOrbit(b, i)));
   const systemScale = Math.min(0.15, (starRadius * 1.8) / maxOrbit);
   scaleRoot.scale.setScalar(systemScale);
+  const labelInvScale = 0.06 / systemScale;
 
   controls.minDistance = 0.01;
 
@@ -1078,6 +1079,7 @@ async function openSystemView(value = selectedStar?.id) {
     hzMesh.userData.kind = "habitableZone";
     scaleRoot.add(hzMesh);
     const hzLabel = makeTextSprite("宜居带", "#9cf7b0", 17);
+    hzLabel.scale.multiplyScalar(labelInvScale);
     hzLabel.position.set(outer, 0.22, 0);
     scaleRoot.add(hzLabel);
   }
@@ -1127,6 +1129,7 @@ async function openSystemView(value = selectedStar?.id) {
     }
 
     const label = makeTextSprite(body.name, body.bodyType === "star" ? "#fff0a8" : "#edf3f8", 19);
+    label.scale.multiplyScalar(labelInvScale);
     label.position.copy(mesh.position).add(new THREE.Vector3(0, radius + 0.34, 0));
     scaleRoot.add(label);
   });
@@ -1156,6 +1159,7 @@ async function openSystemView(value = selectedStar?.id) {
       bodyMeshes.push(mesh);
       bodyMeshById.set(moon.id, mesh);
       const label = makeTextSprite(moon.name, "#d5dce8", 16);
+      label.scale.multiplyScalar(labelInvScale);
       label.position.copy(mesh.position).add(new THREE.Vector3(0, radius + 0.25, 0));
       scaleRoot.add(label);
     } else {
@@ -1177,6 +1181,7 @@ async function openSystemView(value = selectedStar?.id) {
       bodyMeshes.push(mesh);
       bodyMeshById.set(moon.id, mesh);
       const label = makeTextSprite(moon.name, "#d5dce8", 16);
+      label.scale.multiplyScalar(labelInvScale);
       label.position.copy(mesh.position).add(new THREE.Vector3(0, radius + 0.25, 0));
       scaleRoot.add(label);
     }
