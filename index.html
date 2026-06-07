@@ -7,16 +7,10 @@
     <link rel="stylesheet" href="./styles.css" />
     <script>
       window.onerror = function(msg, url, line, col, error) {
-        fetch('http://127.0.0.1:8766/', {
-          method: 'POST',
-          body: JSON.stringify({msg: msg, url: url, line: line, col: col, stack: error ? error.stack : null})
-        }).catch(e => console.error(e));
+        console.error('[onerror]', msg, 'at', url + ':' + line + ':' + col, error ? error.stack : '');
       };
       window.addEventListener("unhandledrejection", function(event) {
-        fetch('http://127.0.0.1:8766/', {
-          method: 'POST',
-          body: JSON.stringify({msg: "Unhandled Promise Rejection", reason: event.reason ? (event.reason.stack || event.reason) : null})
-        }).catch(e => console.error(e));
+        console.error('[unhandledrejection]', event.reason ? (event.reason.stack || event.reason) : event);
       });
     </script>
     <script type="importmap">
@@ -95,6 +89,7 @@
           <label><input id="showQuadrantBounds" type="checkbox" /> 八象限边界</label>
           <label><input id="showOuter" type="checkbox" checked /> 25-50 光年外环</label>
           <label><input id="habitableOnly" type="checkbox" /> 只看宜居/准宜居</label>
+          <label><input id="showHabitableScores" type="checkbox" checked /> 宜居评分</label>
         </div>
 
         <div class="control-block">
@@ -163,6 +158,6 @@
       </div>
     </main>
 
-    <script type="module" src="./app.js?v=2"></script>
+    <script type="module" src="./app.js?v=4"></script>
   </body>
 </html>

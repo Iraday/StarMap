@@ -47,6 +47,7 @@ def row_to_star(row: sqlite3.Row) -> dict:
         "reality": row["reality"],
         "setting": row["setting"],
         "habitable": row["habitable"],
+        "habitabilityScore": get("habitability_score", 0),
         "status": row["status"],
         "objectType": get("object_type", "star_system"),
         "spectralClass": get("spectral_class", ""),
@@ -82,6 +83,8 @@ def row_to_body(row: sqlite3.Row) -> dict:
         "radiusLabel": row["radius_label"],
         "massLabel": row["mass_label"],
         "habitable": row["habitable"],
+        "terraformStatus": row["terraform_status"],
+        "habitabilityScore": row["habitability_score"],
         "summary": row["summary"],
         "sortOrder": row["sort_order"],
         "rule_info_time": row["rule_info_time"],
@@ -277,6 +280,9 @@ class StarMapHandler(SimpleHTTPRequestHandler):
         if "maxPlanets" in params:
             where.append("planet_count <= ?")
             values.append(int(params["maxPlanets"][0]))
+        if "minHabitabilityScore" in params:
+            where.append("habitability_score >= ?")
+            values.append(float(params["minHabitabilityScore"][0]))
         year = int(float(params.get("year", ["2350"])[0]))
         where.append("display_after <= ?")
         values.append(year)
@@ -325,12 +331,14 @@ class StarMapHandler(SimpleHTTPRequestHandler):
             ]
 
         planet_range = con.execute("SELECT MIN(planet_count), MAX(planet_count) FROM stars").fetchone()
+        score_range = con.execute("SELECT MIN(habitability_score), MAX(habitability_score) FROM stars").fetchone()
         return {
             "objectTypes": distinct("object_type"),
             "spectralClasses": distinct("spectral_class"),
             "factionTypes": distinct("faction_type"),
             "factions": self.list_factions(con, {"year": ["2350"]}),
             "planetCount": {"min": planet_range[0] or 0, "max": planet_range[1] or 0},
+            "habitabilityScore": {"min": score_range[0] or 0, "max": score_range[1] or 0},
         }
 
     def api_timeline(self, con: sqlite3.Connection) -> dict:
@@ -433,6 +441,7 @@ class StarMapHandler(SimpleHTTPRequestHandler):
                 "display_until": "displayUntil",
                 "control_start": "controlStart",
                 "control_end": "controlEnd",
+                "habitability_score": "habitabilityScore",
             },
         )
         with connect() as con:
@@ -452,13 +461,13 @@ class StarMapHandler(SimpleHTTPRequestHandler):
                 INSERT OR REPLACE INTO stars (
                   id, name, short, octant, octant_order, distance, arrival,
                   x, y, z, faction, rank, class_name, planets, reality,
-                  setting, habitable, status, object_type, spectral_class,
+                  setting, habitable, habitability_score, status, object_type, spectral_class,
                   star_count, planet_count, confirmed_planets, candidate_planets,
                   faction_type, display_after, display_until, control_start,
                   control_end, notes, updated_at, age, lifespan, disasters,
                   hz_inner, hz_outer, rule_info_time, info_speed, ftl_speed
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record["id"],
@@ -478,6 +487,7 @@ class StarMapHandler(SimpleHTTPRequestHandler):
                     record.get("reality", ""),
                     record.get("setting", ""),
                     int(record.get("habitable", 0)),
+                    float(record.get("habitabilityScore", record.get("habitability_score", 0)) or 0),
                     record.get("status", "core"),
                     record.get("objectType", record.get("object_type", "star_system")),
                     record.get("spectralClass", record.get("spectral_class", record.get("className", "unknown"))),
@@ -521,6 +531,8 @@ class StarMapHandler(SimpleHTTPRequestHandler):
                 "radius_label": "radiusLabel",
                 "mass_label": "massLabel",
                 "sort_order": "sortOrder",
+                "terraform_status": "terraformStatus",
+                "habitability_score": "habitabilityScore",
             },
         )
         with connect() as con:
@@ -538,10 +550,11 @@ class StarMapHandler(SimpleHTTPRequestHandler):
                 """
                 INSERT OR REPLACE INTO system_bodies (
                   id, star_id, parent_id, name, body_type, orbit_au,
-                  radius_label, mass_label, habitable, summary, sort_order,
+                  radius_label, mass_label, habitable, terraform_status,
+                  habitability_score, summary, sort_order,
                   rule_info_time, info_speed, ftl_speed
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record["id"],
@@ -553,6 +566,8 @@ class StarMapHandler(SimpleHTTPRequestHandler):
                     record.get("radiusLabel", ""),
                     record.get("massLabel", ""),
                     int(record.get("habitable", 0)),
+                    record.get("terraformStatus", record.get("terraform_status", "")),
+                    float(record.get("habitabilityScore", record.get("habitability_score", 0)) or 0),
                     record.get("summary", ""),
                     int(record.get("sortOrder", 0)),
                     float(record.get("rule_info_time", 0.05) or 0.05),
@@ -567,7 +582,7 @@ class StarMapHandler(SimpleHTTPRequestHandler):
 def api_docs() -> dict:
     return {
         "endpoints": {
-            "GET /api/stars": "List stars. Query: q, faction, class, objectType, factionType, minPlanets, maxPlanets, year, habitableOnly=1, includeOuter=0.",
+            "GET /api/stars": "List stars. Query: q, faction, class, objectType, factionType, minPlanets, maxPlanets, minHabitabilityScore, year, habitableOnly=1, includeOuter=0.",
             "GET /api/search": "Alias of /api/stars for agent filter/search calls.",
             "GET /api/star?id=gj1002": "Find a star by id, name, short name, or alias.",
             "GET /api/factions": "List factions with counts and colors.",
@@ -591,6 +606,8 @@ def api_docs() -> dict:
             "window.StarMapAgent.updateStar({id, ...changedFields})",
             "window.StarMapAgent.addBody(payload)",
             "window.StarMapAgent.updateBody({id, ...changedFields})",
+            "window.StarMapAgent.setHabitabilityLabels(trueOrFalse)",
+            "window.StarMapAgent.toggleHabitabilityLabels()",
             "window.StarMapAgent.getState()",
         ],
     }

@@ -43,6 +43,7 @@ http://127.0.0.1:8765/
 - 支持势力、天体类型、恒星类型、行星数量、势力类型、自由文本和年份筛选。
 - 点击势力图例会高亮该势力控制的恒星系，按实力顺序排列。
 - 恒星点大小会根据其光谱类型和类别自动调整。
+- 可显示/隐藏宜居评分标签：星图主视图在恒星系下方显示系统内天体评分总和，内部结构视图在行星/卫星名称下方单独显示天体评分。
 - 恒星和星系天体会渲染**控制范围球体**（基于 `可容忍统治信息传播时间 × 信息传播速度 × ftl速度` 计算）。
 - 点击恒星系查看 2350 归属、现实口径、设定统计等详细信息。支持 Markdown 粗体/斜体语法自动渲染，**3D 场景中的名字也会自动应用斜体**（用来标注虚拟天体）。
 - 详情面板支持横向章节导航、侧边章节导航和字段显示开关；默认全选，可快速全选/全不选。
@@ -59,6 +60,9 @@ http://127.0.0.1:8765/
 - 太阳系已补充八大行星平均轨道、月球、木星主要伽利略卫星、泰坦、主小行星带与柯伊伯带。
 - Li-Hartman 内部结构参考 `设定/李-哈特曼恒星系完整设定.md`，包含主星、宜居链、主要卫星、小行星带和外缘冰小天体带；其地图坐标位于 GJ 1002 附近的 `-+-/++-` 交界带。
 - 25-50 光年扩展包含 TRAPPIST-1、LHS 1140、GJ 357、55 Cancri、HD 40307、HD 85512、L 98-59、GJ 486、61 Vir、HD 69830、Upsilon Andromedae、47 UMa、GJ 433、GJ 180 等关键真实系统，并区分稳健/候选宜居与非宜居。
+- 宜居/地球化评分使用 `habitabilityScore`。单个天体范围为 0-1；恒星系评分是内部天体评分求和，可大于 1。恒星、空间站、小行星带、气巨星、冰巨星和迷你海王星本体默认不计分，避免把“卫星可地球化”误算到母行星上。
+- 内部天体可用 `terraformStatus` 标注状态：`natural_habitable`、`terraformed`、`terraforming`、`terraformable`、`habitable`、`none`。Li-Hartman 中 `_环匣_ / _Ringbox_` 本体为 `none` 且 0 分，主卫星 `_匣_ / _Xia_` 为 `terraforming` 且 0.62 分。
+- 受控势力系统会自动补足可点击的地球化中/可地球化虚构行星，使每个当前势力至少拥有 1-2 个可改造或已改造天体。
 - 每个恒星系和内部天体都有 `rule_info_time`、`info_speed`、`ftl_speed`；控制范围球半径按 `rule_info_time × info_speed × ftl_speed` 计算。无 FTL 时 `ftl_speed = 1`。
 
 ## Agent/API 接口
@@ -71,11 +75,13 @@ await StarMapAgent.distanceBetween("gj1002", "teegarden")
 await StarMapAgent.nearestTo("李-哈特曼", 5)
 StarMapAgent.searchStars("美丽花园")
 StarMapAgent.filterStars({ objectType: "brown_dwarf" })
+StarMapAgent.filterStars({ minHabitabilityScore: 1.2, terraformStatus: "terraforming" })
 await StarMapAgent.openSystem("li-hartman")
+StarMapAgent.setHabitabilityLabels(false)
 await StarMapAgent.addStar({ id: "test", name: "Test" }) // 调用后端创建恒星
 await StarMapAgent.updateStar({ id: "test", habitable: 1 }) // 调用后端更新恒星
 await StarMapAgent.addBody({ id: "test-b", starId: "test", name: "_Test b_", bodyType: "planet", orbitAu: 0.8 })
-await StarMapAgent.updateBody({ id: "test-b", habitable: 1, rule_info_time: 0.12 })
+await StarMapAgent.updateBody({ id: "test-b", terraformStatus: "terraforming", habitabilityScore: 0.66, rule_info_time: 0.12 })
 StarMapAgent.getState()
 ```
 
@@ -83,7 +89,7 @@ HTTP API：
 
 ```text
 GET /api/stars
-GET /api/stars?class=M&minPlanets=3&includeOuter=1
+GET /api/stars?class=M&minPlanets=3&minHabitabilityScore=1.2&includeOuter=1
 GET /api/search?q=褐矮星&objectType=brown_dwarf
 GET /api/star?id=gj1002
 GET /api/factions
@@ -132,6 +138,7 @@ JSON body 使用前端 star schema，例如：
   "reality": "待补充。如果是虚拟天体，请用 _星名_ 表示。",
   "setting": "待补充。",
   "habitable": 1,
+  "habitabilityScore": 0.66,
   "status": "license",
   "age": "1.5 Gyr",
   "lifespan": "100 Gyr",
@@ -160,6 +167,8 @@ Content-Type: application/json
   "orbitAu": 0.8,
   "radiusLabel": "类地候选",
   "summary": "_新增行星。_",
+  "terraformStatus": "terraformable",
+  "habitabilityScore": 0.44,
   "sortOrder": 1,
   "rule_info_time": 0.12,
   "info_speed": 1.0,
@@ -181,13 +190,13 @@ data/stars.sqlite
 .\.venv\Scripts\python.exe scripts\init_db.py --force
 ```
 
-当前数据库种子由 `app.js` 的核心 `fallbackStars` 加上 `scripts/seed_data.py` 中的扩展数据合并生成。后续可以直接编辑 SQLite，或通过 `POST|PUT|PATCH /api/stars` 添加/修改恒星系，通过 `POST|PUT|PATCH /api/system-bodies` 添加/修改恒星系内部天体。已有记录支持局部更新，只需要传 `id` 和变化字段；新记录仍需要完整必填字段。
+当前数据库种子优先从已生成的 `star_data.js` 读取 50 光年全量恒星系，再叠加 `scripts/seed_data.py` 中的扩展数据和覆盖项；`scripts/init_db.py --force` 会重建 SQLite v5 schema，并重新推导/补足内部天体评分。后续可以直接编辑 SQLite，或通过 `POST|PUT|PATCH /api/stars` 添加/修改恒星系，通过 `POST|PUT|PATCH /api/system-bodies` 添加/修改恒星系内部天体。已有记录支持局部更新，只需要传 `id` 和变化字段；新记录仍需要完整必填字段。
 
 主要表：
 
-- `stars`：恒星系、非恒星天体、势力归属和筛选字段。
+- `stars`：恒星系、非恒星天体、势力归属、筛选字段和系统级 `habitability_score`。
 - `aliases`：名称/简称检索别名。
-- `system_bodies`：双击后显示的恒星、行星、卫星、小行星带和轨道设施节点。
+- `system_bodies`：双击后显示的恒星、行星、卫星、小行星带和轨道设施节点，包含 `terraform_status` 与单天体 `habitability_score`。
 
 ## 文件结构
 

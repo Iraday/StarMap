@@ -11,7 +11,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DB = ROOT / "data" / "stars.sqlite"
 DEFAULT_APP = ROOT / "app.js"
-SCHEMA_VERSION = 4
+DEFAULT_STAR_DATA = ROOT / "star_data.js"
+SCHEMA_VERSION = 5
 
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -38,6 +39,7 @@ CREATE TABLE IF NOT EXISTS stars (
   reality TEXT NOT NULL,
   setting TEXT NOT NULL,
   habitable INTEGER NOT NULL DEFAULT 0,
+  habitability_score REAL NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'core',
   object_type TEXT NOT NULL DEFAULT 'star_system',
   spectral_class TEXT NOT NULL DEFAULT '',
@@ -78,6 +80,8 @@ CREATE TABLE IF NOT EXISTS system_bodies (
   radius_label TEXT NOT NULL DEFAULT '',
   mass_label TEXT NOT NULL DEFAULT '',
   habitable INTEGER NOT NULL DEFAULT 0,
+  terraform_status TEXT NOT NULL DEFAULT '',
+  habitability_score REAL NOT NULL DEFAULT 0,
   summary TEXT NOT NULL DEFAULT '',
   sort_order INTEGER NOT NULL DEFAULT 0,
   rule_info_time REAL NOT NULL DEFAULT 0,
@@ -93,6 +97,7 @@ CREATE INDEX IF NOT EXISTS idx_bodies_star ON system_bodies(star_id, sort_order)
 
 
 STAR_COLUMNS = {
+    "habitability_score": "REAL NOT NULL DEFAULT 0",
     "object_type": "TEXT NOT NULL DEFAULT 'star_system'",
     "spectral_class": "TEXT NOT NULL DEFAULT ''",
     "star_count": "INTEGER NOT NULL DEFAULT 1",
@@ -113,6 +118,11 @@ STAR_COLUMNS = {
     "rule_info_time": "REAL NOT NULL DEFAULT 0",
     "info_speed": "REAL NOT NULL DEFAULT 0",
     "ftl_speed": "REAL NOT NULL DEFAULT 1",
+}
+
+BODY_COLUMNS = {
+    "terraform_status": "TEXT NOT NULL DEFAULT ''",
+    "habitability_score": "REAL NOT NULL DEFAULT 0",
 }
 
 
@@ -236,6 +246,119 @@ def normalize_fiction_text(value: str) -> str:
     return italicize(text)
 
 
+def strip_markup(value: str) -> str:
+    return re.sub(r"[_*~]+", "", str(value or "")).strip()
+
+
+def clean_name(value: str) -> str:
+    text = strip_markup(value)
+    return re.split(r"\s*/\s*", text)[0].strip() or "未命名"
+
+
+def clamp_score(value) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, min(1.0, number))
+
+
+def explicit_score(item: dict) -> float | None:
+    for key in ("habitabilityScore", "habitability_score"):
+        if key in item and item[key] not in (None, ""):
+            return clamp_score(item[key])
+    return None
+
+
+def body_text(item: dict) -> str:
+    return " ".join(
+        strip_markup(item.get(key, ""))
+        for key in ("name", "bodyType", "radiusLabel", "radius_label", "massLabel", "mass_label", "summary")
+    )
+
+
+def is_planetary_body(item: dict) -> bool:
+    return str(item.get("bodyType", item.get("body_type", ""))) in {"planet", "moon"}
+
+
+def is_non_terrestrial_planet(item: dict) -> bool:
+    if str(item.get("bodyType", item.get("body_type", ""))) != "planet":
+        return False
+    text = body_text(item).casefold()
+    identity_text = " ".join(
+        strip_markup(item.get(key, ""))
+        for key in ("name", "radiusLabel", "radius_label", "massLabel", "mass_label")
+    ).casefold()
+    non_terrestrial_terms = (
+        "迷你海王星",
+        "海王星",
+        "冰巨",
+        "气巨",
+        "气态",
+        "巨行星",
+        "木星",
+        "土星",
+        "天王星",
+        "gas giant",
+        "ice giant",
+        "mini-neptune",
+        "sub-neptune",
+        "neptune",
+        "jupiter",
+        "saturn",
+        "uranus",
+    )
+    terrestrial_terms = ("类地", "地球", "岩石", "岩质", "超级地球", "浮空文明")
+    if any(term in identity_text for term in non_terrestrial_terms):
+        return not any(term in identity_text for term in terrestrial_terms)
+    return any(term in text for term in non_terrestrial_terms) and not any(term in text for term in terrestrial_terms)
+
+
+def infer_terraform_status(item: dict) -> str:
+    explicit = item.get("terraformStatus", item.get("terraform_status", ""))
+    if explicit not in (None, ""):
+        return str(explicit)
+    if not is_planetary_body(item) or is_non_terrestrial_planet(item):
+        return ""
+    text = body_text(item)
+    lower = text.casefold()
+    if "地球" in text and str(item.get("id", "")).casefold() == "earth":
+        return "natural_habitable"
+    if any(term in text for term in ("天生类地", "天然类地", "第一宜居", "主居住地")):
+        return "natural_habitable"
+    if any(term in text for term in ("已地球化", "完成地球化", "成熟地球化")):
+        return "terraformed"
+    if any(term in text for term in ("半地球化", "地球化未完工", "地球化中", "改造工程", "穹顶", "浮空文明")):
+        return "terraforming"
+    if any(term in text for term in ("可改造", "准宜居", "候选", "温和", "宜居带", "液态水", "富水", "冰下海洋")):
+        return "terraformable"
+    if "habitable" in lower or int(item.get("habitable", 0) or 0):
+        return "habitable"
+    return ""
+
+
+def infer_habitability_score(item: dict) -> float:
+    explicit = explicit_score(item)
+    if explicit is not None:
+        return explicit
+    if not is_planetary_body(item) or is_non_terrestrial_planet(item):
+        return 0.0
+    if str(item.get("id", "")).casefold() == "earth" or strip_markup(item.get("name", "")) == "地球":
+        return 1.0
+    status = infer_terraform_status(item)
+    if status == "natural_habitable":
+        return 0.92
+    if status == "terraformed":
+        return 0.86
+    if status == "terraforming":
+        return 0.64
+    if status == "terraformable":
+        return 0.42
+    if status == "habitable":
+        return 0.72
+    return 0.0
+
+
 def normalize_star_seed(raw: dict) -> dict:
     star = dict(raw)
     star.update(STAR_OVERRIDES.get(star["id"], {}))
@@ -273,7 +396,17 @@ def normalize_star_seed(raw: dict) -> dict:
 def load_all_seed_stars(app_path: Path = DEFAULT_APP) -> list[dict]:
     seen = set()
     merged = []
-    for star in [*load_seed_from_app(app_path), *EXTRA_STARS]:
+    app_stars = []
+    source_errors = []
+    for source in dict.fromkeys([app_path, DEFAULT_STAR_DATA]):
+        try:
+            app_stars = load_seed_from_app(source)
+            break
+        except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
+            source_errors.append(f"{source.name}: {exc}")
+    if not app_stars and source_errors:
+        print("Seed source fallback failed; using scripts.seed_data only: " + " | ".join(source_errors), file=sys.stderr)
+    for star in [*app_stars, *EXTRA_STARS]:
         normalized = normalize_star_seed(star)
         if normalized["id"] in seen:
             continue
@@ -309,6 +442,96 @@ def ensure_star_columns(con: sqlite3.Connection) -> None:
     con.execute("CREATE INDEX IF NOT EXISTS idx_stars_faction_type ON stars(faction_type)")
 
 
+def ensure_body_columns(con: sqlite3.Connection) -> None:
+    existing = {row[1] for row in con.execute("PRAGMA table_info(system_bodies)").fetchall()}
+    for column, spec in BODY_COLUMNS.items():
+        if column not in existing:
+            con.execute(f"ALTER TABLE system_bodies ADD COLUMN {column} {spec}")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_bodies_terraform_status ON system_bodies(terraform_status)")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_bodies_habitability_score ON system_bodies(habitability_score)")
+
+
+def terraform_orbit(star: dict, slot: int) -> float:
+    inner = float(star.get("hz_inner", 0) or 0)
+    outer = float(star.get("hz_outer", 0) or 0)
+    if inner > 0 and outer > inner:
+        ratio = 0.45 if slot == 0 else 0.78
+        return round(inner + (outer - inner) * ratio, 4)
+    spectral = str(star.get("spectralClass", star.get("className", ""))).upper()
+    if "D" in spectral:
+        base = 0.015
+    elif "M" in spectral or "L" in spectral or "T" in spectral:
+        base = 0.08
+    elif "K" in spectral:
+        base = 0.55
+    elif "F" in spectral:
+        base = 1.55
+    elif "A" in spectral:
+        base = 3.0
+    else:
+        base = 1.0
+    return round(base * (1.0 + slot * 0.55), 4)
+
+
+def generated_terraform_body(star: dict, existing_ids: set[str], slot: int, sort_order: int) -> dict:
+    star_name = clean_name(star.get("short") or star.get("name"))
+    faction = clean_name(star.get("faction", "未知势力"))
+    status = "terraforming" if slot == 0 else "terraformable"
+    label = "地球化中" if status == "terraforming" else "可地球化"
+    score = 0.66 if status == "terraforming" else 0.44
+    suffix = "terraforming" if slot == 0 else "terraformable"
+    body_id = f"{star['id']}-{suffix}"
+    if body_id in existing_ids:
+        body_id = f"{body_id}-{slot + 1}"
+    return {
+        "id": body_id,
+        "name": f"_{star_name}{'半成界' if slot == 0 else '可塑界'}_",
+        "parentId": None,
+        "bodyType": "planet",
+        "orbitAu": terraform_orbit(star, slot),
+        "radiusLabel": f"_0.8-1.3 R⊕；{label}类地/冰岩行星_",
+        "massLabel": "_0.5-1.8 M⊕_",
+        "habitable": 1,
+        "terraformStatus": status,
+        "habitabilityScore": score,
+        "summary": f"_{faction}在{star_name}控制区登记的{label}殖民/改造对象，用于 2350 年势力版图的后续扩张设定。_",
+        "sortOrder": sort_order,
+        "rule_info_time": 0.08 if status == "terraforming" else 0.05,
+        "info_speed": float(star.get("info_speed", 1) or 1),
+        "ftl_speed": float(star.get("ftl_speed", 1) or 1),
+    }
+
+
+def enrich_controlled_system(star: dict, bodies: list[dict]) -> list[dict]:
+    faction = str(star.get("faction", ""))
+    if not faction or faction == "无/无所属" or star.get("objectType") == "diffuse_cloud":
+        return bodies
+    existing_ids = {str(body.get("id", "")) for body in bodies}
+    scored = [body for body in bodies if infer_habitability_score(body) >= 0.35]
+    if len(scored) >= 2:
+        return bodies
+    max_sort = max([int(body.get("sortOrder", 0) or 0) for body in bodies] or [0])
+    enriched = list(bodies)
+    for slot in range(2):
+        if len(scored) >= 2:
+            break
+        candidate = generated_terraform_body(star, existing_ids, slot, max_sort + 10 + slot)
+        existing_ids.add(candidate["id"])
+        enriched.append(candidate)
+        scored.append(candidate)
+    return enriched
+
+
+def update_star_body_stats(star: dict, bodies: list[dict]) -> None:
+    body_scores = [infer_habitability_score(body) for body in bodies]
+    scorable_count = sum(1 for score in body_scores if score >= 0.35)
+    planet_count = sum(1 for body in bodies if str(body.get("bodyType")) == "planet")
+    star["habitabilityScore"] = round(sum(body_scores), 3)
+    star["habitable"] = max(int(star.get("habitable", 0) or 0), scorable_count)
+    star["planetCount"] = max(int(star.get("planetCount", 0) or 0), planet_count)
+    star["confirmedPlanets"] = max(int(star.get("confirmedPlanets", 0) or 0), min(planet_count, int(star["planetCount"])))
+
+
 def default_bodies_for(star: dict) -> list[dict]:
     object_type = star.get("objectType", "star_system")
     if object_type == "diffuse_cloud":
@@ -320,6 +543,19 @@ def default_bodies_for(star: dict) -> list[dict]:
                 "orbitAu": 0,
                 "radiusLabel": star.get("className", "星际云"),
                 "summary": star.get("setting", "局部星际介质。"),
+                "sortOrder": 0,
+            }
+        ]
+    if object_type == "rogue_planet":
+        return [
+            {
+                "id": f"{star['id']}-primary",
+                "name": star["short"],
+                "bodyType": "planet",
+                "orbitAu": 0,
+                "radiusLabel": star.get("className", "rogue planet"),
+                "habitable": int(star.get("habitable", 0) or 0),
+                "summary": star.get("setting", star.get("reality", "")),
                 "sortOrder": 0,
             }
         ]
@@ -366,6 +602,7 @@ def default_bodies_for(star: dict) -> list[dict]:
 
 
 def iter_bodies(star: dict):
+    items = []
     for body in SYSTEM_BODY_SEEDS.get(star["id"], default_bodies_for(star)):
         item = dict(body)
         item.setdefault("parentId", None)
@@ -393,7 +630,14 @@ def iter_bodies(star: dict):
         item.setdefault("rule_info_time", default_rule_time)
         item.setdefault("info_speed", float(star.get("info_speed", 1) or 1))
         item.setdefault("ftl_speed", float(star.get("ftl_speed", 1) or 1))
-        yield item
+        if "terraform_status" in item and "terraformStatus" not in item:
+            item["terraformStatus"] = item["terraform_status"]
+        if "habitability_score" in item and "habitabilityScore" not in item:
+            item["habitabilityScore"] = item["habitability_score"]
+        item["terraformStatus"] = infer_terraform_status(item)
+        item["habitabilityScore"] = infer_habitability_score(item)
+        items.append(item)
+    yield from enrich_controlled_system(star, items)
 
 
 def initialize_database(db_path: Path = DEFAULT_DB, app_path: Path = DEFAULT_APP, force: bool = False) -> int:
@@ -417,6 +661,7 @@ def initialize_database(db_path: Path = DEFAULT_DB, app_path: Path = DEFAULT_APP
         con.execute("PRAGMA journal_mode = MEMORY")
         con.executescript(SCHEMA)
         ensure_star_columns(con)
+        ensure_body_columns(con)
         existing = con.execute("SELECT COUNT(*) FROM stars").fetchone()[0]
         version = con.execute("PRAGMA user_version").fetchone()[0]
         if existing and not force and existing == len(stars) and version >= SCHEMA_VERSION:
@@ -427,19 +672,21 @@ def initialize_database(db_path: Path = DEFAULT_DB, app_path: Path = DEFAULT_APP
         con.execute("DELETE FROM stars")
 
         for star in stars:
+            star_bodies = list(iter_bodies(star))
+            update_star_body_stats(star, star_bodies)
             x, y, z = star["xyz"]
             con.execute(
                 """
                 INSERT INTO stars (
                   id, name, short, octant, octant_order, distance, arrival,
                   x, y, z, faction, rank, class_name, planets, reality,
-                  setting, habitable, status, object_type, spectral_class,
+                  setting, habitable, habitability_score, status, object_type, spectral_class,
                   star_count, planet_count, confirmed_planets, candidate_planets,
                   faction_type, display_after, display_until, control_start,
                   control_end, notes, age, lifespan, disasters, hz_inner, hz_outer,
                   rule_info_time, info_speed, ftl_speed
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     star["id"],
@@ -459,6 +706,7 @@ def initialize_database(db_path: Path = DEFAULT_DB, app_path: Path = DEFAULT_APP
                     star["reality"],
                     star["setting"],
                     int(star["habitable"]),
+                    float(star["habitabilityScore"]),
                     star["status"],
                     star["objectType"],
                     star["spectralClass"],
@@ -487,15 +735,16 @@ def initialize_database(db_path: Path = DEFAULT_DB, app_path: Path = DEFAULT_APP
                     "INSERT OR IGNORE INTO aliases(alias, star_id) VALUES (?, ?)",
                     (alias, star["id"]),
                 )
-            for body in iter_bodies(star):
+            for body in star_bodies:
                 con.execute(
                     """
                     INSERT INTO system_bodies (
                       id, star_id, parent_id, name, body_type, orbit_au,
-                      radius_label, mass_label, habitable, summary, sort_order,
+                      radius_label, mass_label, habitable, terraform_status,
+                      habitability_score, summary, sort_order,
                       rule_info_time, info_speed, ftl_speed
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         body["id"],
@@ -507,6 +756,8 @@ def initialize_database(db_path: Path = DEFAULT_DB, app_path: Path = DEFAULT_APP
                         body["radiusLabel"],
                         body["massLabel"],
                         int(body["habitable"]),
+                        body["terraformStatus"],
+                        float(body["habitabilityScore"]),
                         body["summary"],
                         int(body["sortOrder"]),
                         float(body["rule_info_time"]),

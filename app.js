@@ -16,6 +16,7 @@ const showTerritories = document.querySelector("#showTerritories");
 const showOctants = document.querySelector("#showOctants");
 const showOuter = document.querySelector("#showOuter");
 const habitableOnly = document.querySelector("#habitableOnly");
+const showHabitableScores = document.querySelector("#showHabitableScores");
 const starScale = document.querySelector("#starScale");
 const spinToggle = document.querySelector("#spinToggle");
 const agentStar = document.querySelector("#agentStar");
@@ -233,6 +234,7 @@ function normalizeStar(star) {
     spectralClass: className.slice(0, 1),
     starCount: 1,
     planetCount: Number(star.habitable ?? 0),
+    habitabilityScore: Number(star.habitabilityScore ?? star.habitability_score ?? 0),
     confirmedPlanets: 0,
     candidatePlanets: 0,
     factionType: star.rank === "-" ? "许可/争议" : "巨企/类巨企",
@@ -557,6 +559,15 @@ function addStars() {
     label.userData.starLabel = true;
     star.label = label;
     labelLayer.add(label);
+
+    const systemScore = getSystemHabitabilityScore(star);
+    if (systemScore > 0) {
+      const scoreLabel = makeScoreLabel(systemScore, "", true, star.id === "sol" ? 18 : 15);
+      scoreLabel.position.copy(mesh.position).add(new THREE.Vector3(0, -radius * 1.45 - 0.42, 0));
+      scoreLabel.userData.starScoreLabel = true;
+      star.scoreLabel = scoreLabel;
+      labelLayer.add(scoreLabel);
+    }
   });
 }
 
@@ -755,6 +766,7 @@ function updateVisibility() {
   const minPlanetCount = Number(minPlanets.value || 0);
   currentYear = Number(yearSlider.value || 2350);
   yearLabel.textContent = String(currentYear);
+  const showScoreLabels = scoreLabelsVisible();
   stars.forEach((star) => {
     let visible = faction === "all" || star.faction === faction || star.id === "sol";
     if (text) {
@@ -772,7 +784,8 @@ function updateVisibility() {
     star.mesh.visible = visible;
     star.halo.visible = visible;
     if (star.controlSphere) star.controlSphere.visible = visible;
-    if (star.label) star.label.visible = visible;
+    if (star.label) star.label.visible = visible && showLabels.checked;
+    if (star.scoreLabel) star.scoreLabel.visible = visible && showScoreLabels;
     const highlight = activeFaction !== "all" && star.faction === activeFaction;
     const mutedByHighlight = activeFaction !== "all" && !highlight && star.id !== "sol";
     
@@ -781,6 +794,7 @@ function updateVisibility() {
         star.mesh.visible = false;
         star.halo.visible = false;
         if (star.label) star.label.visible = false;
+        if (star.scoreLabel) star.scoreLabel.visible = false;
         if (star.controlSphere) star.controlSphere.visible = false;
       } else {
         const skyR = Number(skyRadius.value);
@@ -797,6 +811,10 @@ function updateVisibility() {
           star.label.visible = visible && inSky && showLabels.checked;
           star.label.material.opacity = 0.4;
         }
+        if (star.scoreLabel) {
+          star.scoreLabel.visible = visible && inSky && showScoreLabels;
+          star.scoreLabel.material.opacity = 0.45;
+        }
       }
     } else {
       star.mesh.material.opacity = mutedByHighlight ? 0.18 : (star.objectType === "diffuse_cloud" ? 0.22 : 1);
@@ -804,10 +822,15 @@ function updateVisibility() {
       star.halo.visible = true;
       star.halo.material.opacity = highlight ? 0.55 : star.status === "outer" ? 0.16 : 0.28;
       if (star.controlSphere) star.controlSphere.material.opacity = highlight ? 0.075 : 0.04;
+      if (star.label) star.label.material.opacity = 1;
+      if (star.scoreLabel) star.scoreLabel.material.opacity = 1;
     }
   });
 
-  labelLayer.visible = showLabels.checked;
+  labelLayer.visible = showLabels.checked || showScoreLabels;
+  systemLayer.traverse((child) => {
+    if (child.userData.habitabilityLabel) child.visible = showScoreLabels;
+  });
   territoryLayer.visible = showTerritories.checked;
   territoryLayer.children.forEach((line) => {
     const [a, b] = line.userData.link;
@@ -827,6 +850,8 @@ function updateScale() {
   stars.forEach((star) => {
     const radius = getStarRadius(star);
     star.mesh.scale.setScalar(radius * Number(starScale.value));
+    if (star.label) star.label.position.copy(star.mesh.position).add(new THREE.Vector3(0, radius * 1.9 + 0.55, 0));
+    if (star.scoreLabel) star.scoreLabel.position.copy(star.mesh.position).add(new THREE.Vector3(0, -radius * 1.45 - 0.42, 0));
   });
 }
 
@@ -853,16 +878,24 @@ function showDetails(star, bodies = null) {
   if (star.notes) rows.push(detailRow("势力", "势力备注", formatMarkdown(star.notes)));
   
   if (bodies) {
-    const esiArray = [];
+    const habArray = [];
     bodies.forEach(body => {
       const habScore = getHabitabilityScore(body);
       if (habScore > 0) {
-        esiArray.push(`${body.name} (${habScore.toFixed(2)})`);
+        const status = terraformStatusLabel(body.terraformStatus ?? body.terraform_status ?? "");
+        habArray.push(`${body.name} (${habScore.toFixed(2)}${status ? ` · ${status}` : ""})`);
       }
     });
-    if (esiArray.length > 0) {
-      rows.push(detailRow("天文", "宜居星球 (ESI)", esiArray.join("<br>")));
+    const systemScore = getSystemHabitabilityScore(star, bodies);
+    if (systemScore > 0) {
+      rows.push(detailRow("天文", "宜居/地球化总分", systemScore.toFixed(2)));
     }
+    if (habArray.length > 0) {
+      rows.push(detailRow("天文", "宜居/地球化天体", habArray.join("<br>")));
+    }
+  } else {
+    const systemScore = getSystemHabitabilityScore(star);
+    if (systemScore > 0) rows.push(detailRow("天文", "宜居/地球化总分", systemScore.toFixed(2)));
   }
 
   if (star.age) rows.push(detailRow("天文", "恒星年龄", formatMarkdown(star.age)));
@@ -886,7 +919,9 @@ function showBodyDetails(body, star) {
     detailRow("物理", "宜居", body.habitable ? "是/准宜居" : "否")
   ];
   if (habScore > 0) {
-    rows.push(detailRow("现实", "地球相似指数 (ESI)", habScore.toFixed(2)));
+    rows.push(detailRow("天文", "宜居/地球化评分", habScore.toFixed(2)));
+    const status = terraformStatusLabel(body.terraformStatus ?? body.terraform_status ?? "");
+    if (status) rows.push(detailRow("天文", "地球化状态", status));
   }
   rows.push(detailRow("说明", "说明", formatMarkdown(body.summary || "-")));
   if (body.bodyType === "star" && star.hz_inner && star.hz_outer) {
@@ -976,6 +1011,7 @@ function clearSystemView() {
     s.mesh.visible = true;
     if (s.halo) s.halo.visible = true;
     if (s.label) s.label.visible = showLabels.checked;
+    if (s.scoreLabel) s.scoreLabel.visible = scoreLabelsVisible();
     if (s.controlSphere) s.controlSphere.visible = true;
     systemViewStar = null;
   }
@@ -987,6 +1023,10 @@ function clearSystemView() {
     if (s.halo) s.halo.visible = true;
     if (s.controlSphere) s.controlSphere.visible = true;
     if (s.label) s.label.material.opacity = 1;
+    if (s.scoreLabel) {
+      s.scoreLabel.material.opacity = 1;
+      s.scoreLabel.visible = scoreLabelsVisible();
+    }
   });
   bodyMeshes.length = 0;
   systemLayer.children.forEach((child) => disposeObject(child));
@@ -995,7 +1035,7 @@ function clearSystemView() {
   inSystemView = false;
   controls.minDistance = 0.5;
   starLayer.visible = true;
-  labelLayer.visible = showLabels.checked;
+  labelLayer.visible = showLabels.checked || scoreLabelsVisible();
   territoryLayer.visible = showTerritories.checked;
 }
 
@@ -1198,23 +1238,88 @@ function hasCuratedSystemDetails(star, bodies = []) {
   });
 }
 
-function getHabitabilityScore(body) {
-  if (body.id === "earth" || body.name === "地球") return 1.0;
-  
-  const pc = body.bodyType === "moon" ? classifyMoon(body) : classifyPlanet(body);
-  const isHab = body.habitable || pc === "earth_like" || pc === "terraforming";
-  if (!isHab) return 0.0;
-  
-  let hash = 0;
-  const str = String(body.id || body.name);
-  for (let i = 0; i < str.length; i++) {
-    hash = Math.imul(31, hash) + str.charCodeAt(i) | 0;
+function normalizeScore(value, clampSingle = true) {
+  const score = Number(value);
+  if (!Number.isFinite(score)) return 0;
+  return clampSingle ? Math.max(0, Math.min(1, score)) : Math.max(0, score);
+}
+
+function explicitHabitabilityScore(item) {
+  if (!item) return null;
+  const raw = item.habitabilityScore ?? item.habitability_score;
+  return raw === undefined || raw === null || raw === "" ? null : normalizeScore(raw);
+}
+
+function cleanBodyText(body) {
+  return [body?.name, body?.radiusLabel, body?.massLabel, body?.summary]
+    .map((value) => String(value || "").replace(/[_*~]/g, ""))
+    .join(" ")
+    .toLocaleLowerCase();
+}
+
+function isNonTerrestrialPlanet(body) {
+  if (body?.bodyType !== "planet") return false;
+  const text = cleanBodyText(body);
+  const identityText = [body?.name, body?.radiusLabel, body?.massLabel]
+    .map((value) => String(value || "").replace(/[_*~]/g, ""))
+    .join(" ")
+    .toLocaleLowerCase();
+  const blocked = ["迷你海王星", "海王星", "冰巨", "气巨", "气态", "巨行星", "木星", "土星", "天王星", "gas giant", "ice giant", "mini-neptune", "sub-neptune", "neptune", "jupiter", "saturn", "uranus"];
+  const override = ["类地", "地球", "岩石", "岩质", "超级地球", "浮空文明"];
+  if (blocked.some((term) => identityText.includes(term))) {
+    return !override.some((term) => identityText.includes(term));
   }
-  const rand = Math.abs(hash) / 2147483647;
-  
-  if (pc === "earth_like") return 0.85 + rand * 0.14; // 0.85 - 0.99
-  if (pc === "terraforming") return 0.60 + rand * 0.24; // 0.60 - 0.84
-  return 0.30 + rand * 0.29; // 0.30 - 0.59
+  return blocked.some((term) => text.includes(term)) && !override.some((term) => text.includes(term));
+}
+
+function getHabitabilityScore(body) {
+  const explicit = explicitHabitabilityScore(body);
+  if (explicit !== null) return explicit;
+  if (!body || !["planet", "moon"].includes(body.bodyType) || isNonTerrestrialPlanet(body)) return 0;
+  if (body.id === "earth" || body.name === "地球") return 1.0;
+  const status = body.terraformStatus ?? body.terraform_status ?? "";
+  if (status === "natural_habitable") return 0.92;
+  if (status === "terraformed") return 0.86;
+  if (status === "terraforming") return 0.64;
+  if (status === "terraformable") return 0.42;
+  const pc = body.bodyType === "moon" ? classifyMoon(body) : classifyPlanet(body);
+  if (pc === "earth_like") return 0.72;
+  if (pc === "terraforming") return 0.64;
+  return body.habitable ? 0.42 : 0;
+}
+
+function getSystemHabitabilityScore(star, bodies = null) {
+  if (bodies) {
+    return bodies.reduce((sum, body) => sum + getHabitabilityScore(body), 0);
+  }
+  return normalizeScore(star?.habitabilityScore ?? star?.habitability_score ?? 0, false);
+}
+
+function terraformStatusLabel(status) {
+  const labels = {
+    natural_habitable: "天然宜居",
+    terraformed: "已地球化",
+    terraforming: "地球化中",
+    terraformable: "可地球化",
+    habitable: "宜居/准宜居"
+  };
+  return labels[status] || "";
+}
+
+function scoreLabelsVisible() {
+  return showHabitableScores ? showHabitableScores.checked : true;
+}
+
+function scoreText(score, status = "", total = false) {
+  const label = terraformStatusLabel(status);
+  const prefix = total ? "ΣH" : "H";
+  return `${prefix} ${score.toFixed(2)}${label ? ` · ${label}` : ""}`;
+}
+
+function makeScoreLabel(score, status = "", total = false, fontSize = 16) {
+  const label = makeTextSprite(scoreText(score, status, total), total ? "#9cf7b0" : "#b4ffce", fontSize);
+  label.userData.habitabilityLabel = true;
+  return label;
 }
 
 function createBodyTexture(type, hexColor) {
@@ -1332,6 +1437,7 @@ async function openSystemView(value = selectedStar?.id) {
   star.mesh.visible = false;
   if (star.halo) star.halo.visible = false;
   if (star.label) star.label.visible = false;
+  if (star.scoreLabel) star.scoreLabel.visible = false;
   if (star.controlSphere) star.controlSphere.visible = false;
 
   // Background stars labels
@@ -1425,7 +1531,6 @@ async function openSystemView(value = selectedStar?.id) {
       scaleRoot.add(outerGlow);
     }
 
-    const pc = body.bodyType === "planet" ? classifyPlanet(body) : null;
     if (pc === "gas_giant" && radius > 0.28) {
       const ringInner = radius * 1.4;
       const ringOuter = radius * 2.2;
@@ -1450,11 +1555,17 @@ async function openSystemView(value = selectedStar?.id) {
 
     const labelColor = body.bodyType === "star" ? "#" + new THREE.Color(color).getHexString() : "#edf3f8";
     const habScore = getHabitabilityScore(body);
-    const nameStr = habScore > 0 ? `${body.name} (ESI: ${habScore.toFixed(2)})` : body.name;
-    const label = makeTextSprite(nameStr, labelColor, 19);
+    const label = makeTextSprite(body.name, labelColor, 19);
     label.scale.multiplyScalar(labelInvScale);
     label.position.copy(mesh.position).add(new THREE.Vector3(0, radius + 0.34, 0));
     scaleRoot.add(label);
+    if (habScore > 0) {
+      const scoreLabel = makeScoreLabel(habScore, body.terraformStatus ?? body.terraform_status ?? "", false, 14);
+      scoreLabel.scale.multiplyScalar(labelInvScale);
+      scoreLabel.visible = scoreLabelsVisible();
+      scoreLabel.position.copy(mesh.position).add(new THREE.Vector3(0, -radius - 0.22, 0));
+      scaleRoot.add(scoreLabel);
+    }
   });
 
   moons.forEach((moon, moonIdx) => {
@@ -1485,11 +1596,17 @@ async function openSystemView(value = selectedStar?.id) {
       bodyMeshes.push(mesh);
       bodyMeshById.set(moon.id, mesh);
       const habScore = getHabitabilityScore(moon);
-      const nameStr = habScore > 0 ? `${moon.name} (ESI: ${habScore.toFixed(2)})` : moon.name;
-      const label = makeTextSprite(nameStr, "#d5dce8", 16);
+      const label = makeTextSprite(moon.name, "#d5dce8", 16);
       label.scale.multiplyScalar(labelInvScale);
       label.position.copy(mesh.position).add(new THREE.Vector3(0, radius + 0.25, 0));
       scaleRoot.add(label);
+      if (habScore > 0) {
+        const scoreLabel = makeScoreLabel(habScore, moon.terraformStatus ?? moon.terraform_status ?? "", false, 13);
+        scoreLabel.scale.multiplyScalar(labelInvScale);
+        scoreLabel.visible = scoreLabelsVisible();
+        scoreLabel.position.copy(mesh.position).add(new THREE.Vector3(0, -radius - 0.20, 0));
+        scaleRoot.add(scoreLabel);
+      }
     } else {
       const globalIdx = nonMoons.length + moonIdx;
       const orbitRadius = scaledOrbit(moon, globalIdx);
@@ -1514,6 +1631,14 @@ async function openSystemView(value = selectedStar?.id) {
       label.scale.multiplyScalar(labelInvScale);
       label.position.copy(mesh.position).add(new THREE.Vector3(0, radius + 0.25, 0));
       scaleRoot.add(label);
+      const habScore = getHabitabilityScore(moon);
+      if (habScore > 0) {
+        const scoreLabel = makeScoreLabel(habScore, moon.terraformStatus ?? moon.terraform_status ?? "", false, 13);
+        scoreLabel.scale.multiplyScalar(labelInvScale);
+        scoreLabel.visible = scoreLabelsVisible();
+        scoreLabel.position.copy(mesh.position).add(new THREE.Vector3(0, -radius - 0.20, 0));
+        scaleRoot.add(scoreLabel);
+      }
     }
   });
 
@@ -1538,6 +1663,10 @@ async function openSystemView(value = selectedStar?.id) {
     if (s.label) {
       s.label.visible = inSky && showLabels.checked;
       s.label.material.opacity = 0.4;
+    }
+    if (s.scoreLabel) {
+      s.scoreLabel.visible = inSky && scoreLabelsVisible();
+      s.scoreLabel.material.opacity = 0.45;
     }
   });
   territoryLayer.visible = false;
@@ -1756,6 +1885,12 @@ function matchesAgentFilters(star, filters = {}) {
   if (filters.spectralClass && filters.spectralClass !== "all" && !String(star.spectralClass).includes(filters.spectralClass)) return false;
   if (filters.factionType && filters.factionType !== "all" && star.factionType !== filters.factionType) return false;
   if (filters.minPlanets !== undefined && star.planetCount < Number(filters.minPlanets)) return false;
+  if (filters.minHabitabilityScore !== undefined && getSystemHabitabilityScore(star) < Number(filters.minHabitabilityScore)) return false;
+  if (filters.terraformStatus) {
+    const wanted = String(filters.terraformStatus);
+    const bodies = fallbackBodies[star.id] || [];
+    if (!bodies.some((body) => String(body.terraformStatus ?? body.terraform_status ?? "") === wanted)) return false;
+  }
   if (filters.habitableOnly && star.habitable < 1) return false;
   const year = Number(filters.year ?? currentYear);
   return star.displayAfter <= year && (star.displayUntil === null || star.displayUntil === undefined || star.displayUntil >= year);
@@ -1770,6 +1905,7 @@ function filterStars(filters = {}) {
     objectType: star.objectType,
     spectralClass: star.spectralClass,
     planetCount: star.planetCount,
+    habitabilityScore: getSystemHabitabilityScore(star),
     xyz: star.xyz
   })));
   return result;
@@ -1812,6 +1948,16 @@ function exposeAgentApi() {
     },
     addBody: async (payload) => api.upsertBody(payload),
     updateBody: async (payload) => api.upsertBody({ ...payload, partial: true }),
+    setHabitabilityLabels: (visible) => {
+      if (showHabitableScores) showHabitableScores.checked = Boolean(visible);
+      updateVisibility();
+      return { showHabitabilityScores: scoreLabelsVisible() };
+    },
+    toggleHabitabilityLabels: () => {
+      if (showHabitableScores) showHabitableScores.checked = !showHabitableScores.checked;
+      updateVisibility();
+      return { showHabitabilityScores: scoreLabelsVisible() };
+    },
     clearSystem: () => {
       clearSystemView();
       writeAgentOutput({ action: "clearSystem" });
@@ -1820,6 +1966,7 @@ function exposeAgentApi() {
       selected: selectedStar,
       selectedBody,
       currentYear,
+      showHabitabilityScores: scoreLabelsVisible(),
       starCount: stars.length,
       visibleStarCount: stars.filter((star) => star.mesh?.visible).length,
       camera: camera.position.toArray(),
@@ -1850,8 +1997,8 @@ function bindUi() {
     toggleRight.textContent = panelRight.classList.contains("collapsed") ? "☰" : "✕";
   });
 
-  [showLabels, showTerritories, showOctants, showQuadrantBounds, showOuter, habitableOnly, objectTypeFilter, spectralFilter, factionTypeFilter].forEach((el) => {
-    el.addEventListener("change", updateVisibility);
+  [showLabels, showTerritories, showOctants, showQuadrantBounds, showOuter, habitableOnly, showHabitableScores, objectTypeFilter, spectralFilter, factionTypeFilter].forEach((el) => {
+    el?.addEventListener("change", updateVisibility);
   });
   factionFilter.addEventListener("change", () => {
     activeFaction = "all";
