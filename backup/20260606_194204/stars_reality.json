@@ -1,0 +1,392 @@
+[
+  {
+    "id": "sol",
+    "name": "太阳 / Sol",
+    "reality": "人类母星系；2278 内战源点。",
+    "short": "Sol"
+  },
+  {
+    "id": "barnard",
+    "name": "Barnard's Star / 巴纳德星",
+    "reality": "现实最新口径偏近轨热小行星/低质量岩石行星，无稳健宜居带世界。",
+    "short": "Barnard"
+  },
+  {
+    "id": "wolf1061",
+    "name": "Wolf 1061",
+    "reality": "Wolf 1061 c 常列内侧宜居带/临界候选。",
+    "short": "Wolf 1061"
+  },
+  {
+    "id": "gj625",
+    "name": "GJ 625",
+    "reality": "GJ 625 b 为内侧宜居带边缘超级地球，可能偏热。",
+    "short": "GJ 625"
+  },
+  {
+    "id": "vega",
+    "name": "Vega / 织女星",
+    "reality": "无确认宜居行星；尘埃/碎屑盘显著。",
+    "short": "Vega"
+  },
+  {
+    "id": "gj887",
+    "name": "GJ 887 / Lacaille 9352 / 拉卡伊9352",
+    "reality": "已知多行星；GJ 887 d 为宜居带超级地球，偏大。",
+    "short": "GJ 887"
+  },
+  {
+    "id": "fomalhaut",
+    "name": "Fomalhaut / 北落师门",
+    "reality": "无稳健类地宜居确认；著名碎屑盘。",
+    "short": "Fomalhaut"
+  },
+  {
+    "id": "ross128",
+    "name": "Ross 128",
+    "reality": "Ross 128 b 为近邻温和岩石/超级地球候选，主星较安静。",
+    "short": "Ross 128"
+  },
+  {
+    "id": "gj667c",
+    "name": "GJ 667 C / Gliese 667 C",
+    "reality": "GJ 667 Cc 为著名宜居带超级地球；其他多行星解争议大。",
+    "short": "GJ 667 C"
+  },
+  {
+    "id": "alpha",
+    "name": "Alpha Centauri AB + Proxima / 半人马座α三合星",
+    "reality": "Proxima b 位于宜居带但受耀斑/潮汐锁定风险；AB 未有稳健宜居确认。",
+    "short": "Alpha Cen"
+  },
+  {
+    "id": "epsilon-indi",
+    "name": "Epsilon Indi / 印第安座ε",
+    "reality": "巨行星/褐矮星系统资源突出，无强宜居背书。",
+    "short": "Epsilon Indi"
+  },
+  {
+    "id": "gj682",
+    "name": "GJ 682",
+    "reality": "行星候选存在争议，宜居性不稳。",
+    "short": "GJ 682"
+  },
+  {
+    "id": "beta-hydri",
+    "name": "Beta Hydri / 水蛇座β",
+    "reality": "无确认宜居行星；主星演化阶段不适合长期新殖民核心。",
+    "short": "Beta Hydri"
+  },
+  {
+    "id": "luyten726",
+    "name": "Luyten 726-8 / UV Ceti",
+    "reality": "耀星双星，无强宜居背书。",
+    "short": "UV Ceti"
+  },
+  {
+    "id": "groombridge34",
+    "name": "Groombridge 34 / 格鲁姆布里奇34",
+    "reality": "近轨/冷行星候选，无稳健宜居带地表。",
+    "short": "Groombridge 34"
+  },
+  {
+    "id": "tau-ceti",
+    "name": "Tau Ceti / 天仓五",
+    "reality": "e/f 等宜居讨论在 2026 口径下已明显削弱或视为伪信号。",
+    "short": "Tau Ceti"
+  },
+  {
+    "id": "teegarden",
+    "name": "Teegarden's Star / 提加登星",
+    "reality": "Teegarden b/c 为近邻地球质量级宜居带候选。",
+    "short": "Teegarden"
+  },
+  {
+    "id": "gj1002",
+    "name": "GJ 1002",
+    "reality": "GJ 1002 b/c 为两颗地球质量级宜居带行星。",
+    "short": "GJ 1002"
+  },
+  {
+    "id": "hd219134",
+    "name": "HD 219134",
+    "reality": "多颗近轨超级地球/热岩石行星，部分凌星。",
+    "short": "HD 219134"
+  },
+  {
+    "id": "107piscium",
+    "name": "107 Piscium / HD 10476",
+    "reality": "无稳健确认宜居行星。",
+    "short": "107 Piscium"
+  },
+  {
+    "id": "wolf359",
+    "name": "Wolf 359",
+    "reality": "行星候选不宜居；耀发环境极端。",
+    "short": "Wolf 359"
+  },
+  {
+    "id": "lalande",
+    "name": "Lalande 21185 / 拉兰德21185",
+    "reality": "已知/候选近轨超级地球，无稳健开放地表宜居。",
+    "short": "Lalande 21185"
+  },
+  {
+    "id": "gj273",
+    "name": "GJ 273 / Luyten's Star / 鲁坦星",
+    "reality": "GJ 273 b 为经典宜居带超级地球候选。",
+    "short": "GJ 273"
+  },
+  {
+    "id": "gj251",
+    "name": "GJ 251",
+    "reality": "GJ 251 c 为 2025 宜居带候选；仍需确认。",
+    "short": "GJ 251"
+  },
+  {
+    "id": "epsilon-eridani",
+    "name": "Epsilon Eridani / 天苑四",
+    "reality": "巨行星与碎屑盘资源强，无确认宜居类地。",
+    "short": "Epsilon Eri"
+  },
+  {
+    "id": "gj1061",
+    "name": "GJ 1061",
+    "reality": "GJ 1061 c/d 为双宜居带候选。",
+    "short": "GJ 1061"
+  },
+  {
+    "id": "kapteyn",
+    "name": "Kapteyn's Star / 卡普坦星",
+    "reality": "Kapteyn b 等早期宜居候选争议较大。",
+    "short": "Kapteyn"
+  },
+  {
+    "id": "40eridani",
+    "name": "40 Eridani A / 波江座40A",
+    "reality": "早期行星候选争议/可能被排除；无稳健宜居确认。",
+    "short": "40 Eridani"
+  },
+  {
+    "id": "hd20794",
+    "name": "HD 20794 / 82 Eridani / 波江座82",
+    "reality": "近年确认/强化一颗偏心宜居带超级地球。",
+    "short": "HD 20794"
+  },
+  {
+    "id": "li-hartman",
+    "name": "*李-哈特曼* / *Li-Hartman*",
+    "reality": "架空锚点，置于 HD 20794 与 LTT 1445 A 邻近外缘。",
+    "short": "*Li-Hartman*"
+  },
+  {
+    "id": "ltt1445",
+    "name": "LTT 1445 A",
+    "reality": "b/c 为近轨热行星；Ad 为宜居带候选但置信偏低。",
+    "short": "LTT 1445 A"
+  },
+  {
+    "id": "luhman16",
+    "name": "Luhman 16 / WISE 1049-5319",
+    "reality": "太阳近邻褐矮星双星，位于 25 光年内，无已知宜居行星。",
+    "short": "Luhman 16"
+  },
+  {
+    "id": "wise0855",
+    "name": "WISE 0855-0714",
+    "reality": "太阳近邻亚褐矮星/行星质量天体，无行星系统确认。",
+    "short": "WISE 0855"
+  },
+  {
+    "id": "sirius",
+    "name": "Sirius / 天狼星",
+    "reality": "著名近邻双星，无确认行星。",
+    "short": "Sirius"
+  },
+  {
+    "id": "ez-aqr",
+    "name": "EZ Aquarii",
+    "reality": "近邻红矮星三合星，无稳健行星确认。",
+    "short": "EZ Aqr"
+  },
+  {
+    "id": "61cyg",
+    "name": "61 Cygni",
+    "reality": "近邻 K 型双星，无确认宜居行星。",
+    "short": "61 Cyg"
+  },
+  {
+    "id": "procyon",
+    "name": "Procyon / 南河三",
+    "reality": "近邻双星，无确认行星。",
+    "short": "Procyon"
+  },
+  {
+    "id": "struve2398",
+    "name": "Struve 2398 / Gliese 725",
+    "reality": "近邻红矮星双星，无确认行星。",
+    "short": "Struve 2398"
+  },
+  {
+    "id": "dx-cancri",
+    "name": "DX Cancri",
+    "reality": "近邻红矮星，无确认行星。",
+    "short": "DX Cnc"
+  },
+  {
+    "id": "yz-ceti",
+    "name": "YZ Ceti",
+    "reality": "已知多颗近轨行星，整体偏热。",
+    "short": "YZ Ceti"
+  },
+  {
+    "id": "scr1845",
+    "name": "SCR 1845-6357",
+    "reality": "近邻低温双体系统，无确认行星。",
+    "short": "SCR 1845"
+  },
+  {
+    "id": "denis1048",
+    "name": "DENIS 1048-3956",
+    "reality": "太阳近邻低质量恒星，无确认行星。",
+    "short": "DENIS 1048"
+  },
+  {
+    "id": "kruger60",
+    "name": "Kruger 60",
+    "reality": "近邻双红矮星，无确认行星。",
+    "short": "Kruger 60"
+  },
+  {
+    "id": "van-maanen",
+    "name": "Van Maanen 2",
+    "reality": "近邻孤立白矮星，无确认现存宜居行星。",
+    "short": "Van Maanen"
+  },
+  {
+    "id": "gliese1",
+    "name": "Gliese 1",
+    "reality": "近邻红矮星，无确认行星。",
+    "short": "Gliese 1"
+  },
+  {
+    "id": "wolf424",
+    "name": "Wolf 424 / FL Virginis",
+    "reality": "近邻红矮星双星，无确认宜居行星。",
+    "short": "Wolf 424"
+  },
+  {
+    "id": "gj674",
+    "name": "GJ 674",
+    "reality": "已知一颗短周期行星，非宜居。",
+    "short": "GJ 674"
+  },
+  {
+    "id": "gj876",
+    "name": "Gliese 876",
+    "reality": "著名多行星红矮星系统，存在强轨道共振。",
+    "short": "GJ 876"
+  },
+  {
+    "id": "ad-leonis",
+    "name": "AD Leonis / Gliese 388",
+    "reality": "著名活跃红矮星，无确认宜居行星。",
+    "short": "AD Leo"
+  },
+  {
+    "id": "70oph",
+    "name": "70 Ophiuchi",
+    "reality": "近邻双星，无稳健行星确认。",
+    "short": "70 Oph"
+  },
+  {
+    "id": "altair",
+    "name": "Altair / 河鼓二",
+    "reality": "明亮近邻 A 型星，无确认行星。",
+    "short": "Altair"
+  },
+  {
+    "id": "stein2051",
+    "name": "Stein 2051",
+    "reality": "近邻双星，无确认行星。",
+    "short": "Stein 2051"
+  },
+  {
+    "id": "sigma-dra",
+    "name": "Sigma Draconis",
+    "reality": "近邻 K 型星，无确认行星。",
+    "short": "Sigma Dra"
+  },
+  {
+    "id": "gliese229",
+    "name": "Gliese 229",
+    "reality": "著名红矮星 + 褐矮星伴星系统。",
+    "short": "GJ 229"
+  },
+  {
+    "id": "gliese570",
+    "name": "Gliese 570",
+    "reality": "近邻多星系统，含 T 型褐矮星。",
+    "short": "GJ 570"
+  },
+  {
+    "id": "v1216sgr",
+    "name": "V1216 Sagittarii / GJ 729",
+    "reality": "近邻耀星，无确认行星。",
+    "short": "V1216 Sgr"
+  },
+  {
+    "id": "eta-cas",
+    "name": "Eta Cassiopeiae",
+    "reality": "近邻 G/K 双星，无确认行星。",
+    "short": "Eta Cas"
+  },
+  {
+    "id": "36oph",
+    "name": "36 Ophiuchi",
+    "reality": "近邻 K 型多星系统。",
+    "short": "36 Oph"
+  },
+  {
+    "id": "delta-pav",
+    "name": "Delta Pavonis",
+    "reality": "近邻类太阳亚巨星，无确认行星。",
+    "short": "Delta Pav"
+  },
+  {
+    "id": "eq-peg",
+    "name": "EQ Pegasi",
+    "reality": "近邻红矮星双星，无确认行星。",
+    "short": "EQ Peg"
+  },
+  {
+    "id": "gliese581",
+    "name": "Gliese 581",
+    "reality": "历史上多宜居候选争议，后续许多候选被削弱或否定。",
+    "short": "GJ 581"
+  },
+  {
+    "id": "xi-bootis",
+    "name": "Xi Bootis",
+    "reality": "近邻双星，无确认行星。",
+    "short": "Xi Boo"
+  },
+  {
+    "id": "gliese832",
+    "name": "Gliese 832",
+    "reality": "已知巨行星系统，曾有宜居候选争议。",
+    "short": "GJ 832"
+  },
+  {
+    "id": "local-cloud",
+    "name": "Local Interstellar Cloud / 本地星际云",
+    "reality": "太阳目前位于或接近本地星际云区域。",
+    "short": "本地星际云"
+  },
+  {
+    "id": "g-cloud",
+    "name": "G Cloud / G 云",
+    "reality": "太阳附近的星际云候选结构之一。",
+    "short": "G 云"
+  }
+]
