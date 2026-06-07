@@ -325,7 +325,28 @@ def infer_habitability_score(item: dict) -> float:
     explicit = explicit_score(item)
     if explicit is not None:
         return explicit
-    return 0.0
+    # Fall back to habitable flag + terraform_status for real (non-fictional) bodies
+    if not str(item.get("id", "")).endswith("-fictional-moon-" + str(item.get("id", "")).split("-fictional-moon-")[-1]):
+        pass  # check below
+    body_id = str(item.get("id", ""))
+    if "fictional-moon" in body_id:
+        return 0.0
+    hab = int(item.get("habitable", item.get("habitability", 0)) or 0)
+    if not hab:
+        return 0.0
+    status = infer_terraform_status(item)
+    if status == "natural_habitable":
+        return 0.85
+    if status == "habitable":
+        return 0.65
+    if status == "terraformed":
+        return 0.75
+    if status == "terraforming":
+        return 0.50
+    if status == "terraformable":
+        return 0.35
+    # habitable=1 but no status: treat as candidate (terraformable)
+    return 0.35
 
 
 def normalize_star_seed(raw: dict) -> dict:
