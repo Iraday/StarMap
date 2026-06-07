@@ -773,11 +773,20 @@ function updateVisibility() {
     const highlight = activeFaction !== "all" && star.faction === activeFaction;
     const mutedByHighlight = activeFaction !== "all" && !highlight && star.id !== "sol";
     
-    if (inSystemView && systemViewStar && star.id === systemViewStar.id) {
-      star.mesh.visible = false;
-      star.halo.visible = false;
-      if (star.label) star.label.visible = false;
-      if (star.controlSphere) star.controlSphere.visible = false;
+    if (inSystemView && systemViewStar) {
+      if (star.id === systemViewStar.id) {
+        star.mesh.visible = false;
+        star.halo.visible = false;
+        if (star.label) star.label.visible = false;
+        if (star.controlSphere) star.controlSphere.visible = false;
+      } else {
+        star.mesh.scale.setScalar(0.06);
+        star.mesh.material.opacity = 0.5;
+        star.mesh.material.transparent = true;
+        star.halo.visible = false;
+        if (star.controlSphere) star.controlSphere.visible = false;
+        if (star.label) star.label.material.opacity = 0.4;
+      }
     } else {
       star.mesh.material.opacity = mutedByHighlight ? 0.18 : (star.objectType === "diffuse_cloud" ? 0.22 : 1);
       star.mesh.material.transparent = mutedByHighlight || star.objectType === "diffuse_cloud";
@@ -940,6 +949,15 @@ function clearSystemView() {
     if (s.controlSphere) s.controlSphere.visible = true;
     systemViewStar = null;
   }
+  stars.forEach((s) => {
+    const radius = getStarRadius(s);
+    s.mesh.scale.setScalar(radius * Number(starScale.value));
+    s.mesh.material.opacity = s.objectType === "diffuse_cloud" ? 0.22 : 1;
+    s.mesh.material.transparent = s.objectType === "diffuse_cloud";
+    if (s.halo) s.halo.visible = true;
+    if (s.controlSphere) s.controlSphere.visible = true;
+    if (s.label) s.label.material.opacity = 1;
+  });
   bodyMeshes.length = 0;
   systemLayer.children.forEach((child) => disposeObject(child));
   systemLayer.clear();
@@ -967,6 +985,137 @@ function exitSystemView() {
 function makeOrbit(radius, color = 0x8ca6c8) {
   const material = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.58 });
   return makeCircle(radius, 160, material);
+}
+
+function starColorFromSpec(specOrLabel) {
+  const s = String(specOrLabel || "").toUpperCase();
+  if (s.includes("O")) return 0x9db8ff;
+  if (s.includes("B")) return 0xbbccff;
+  if (s.includes("A")) return 0xe8e8ff;
+  if (s.includes("F")) return 0xfff4e8;
+  if (s.includes("G")) return 0xffed82;
+  if (s.includes("K")) return 0xffb347;
+  if (s.includes("M")) return 0xff6a4d;
+  if (s.includes("L") || s.includes("T") || s.includes("Y")) return 0x8b3a3a;
+  if (s.includes("D")) return 0xd0d8ff;
+  return 0xfff0a8;
+}
+
+function parseRadius(label) {
+  const clean = String(label || "").replace(/[_*~]/g, "");
+  const m = clean.match(/([\d.]+)\s*R([⊕♃☉])/);
+  if (!m) return null;
+  const val = parseFloat(m[1]);
+  const unit = m[2];
+  if (unit === "☉") return val * 109.2;
+  if (unit === "♃") return val * 11.2;
+  return val;
+}
+
+function parseMass(label) {
+  const clean = String(label || "").replace(/[_*~]/g, "");
+  const m = clean.match(/([\d.]+)\s*M([⊕♃☉])/);
+  if (!m) return null;
+  const val = parseFloat(m[1]);
+  const unit = m[2];
+  if (unit === "☉") return val * 332946;
+  if (unit === "♃") return val * 317.8;
+  return val;
+}
+
+function classifyPlanet(body) {
+  const re = parseRadius(body.radiusLabel);
+  const me = parseMass(body.massLabel);
+  const name = String(body.name || "").replace(/[_*~]/g, "").toLowerCase();
+  const summary = String(body.summary || "").replace(/[_*~]/g, "").toLowerCase();
+  const id = String(body.id || "").toLowerCase();
+
+  if (re !== null && re > 6) return "gas_giant";
+  if (me !== null && me > 80) return "gas_giant";
+  if (summary.includes("气态巨行星") || summary.includes("类木") || summary.includes("超级木星")) return "gas_giant";
+
+  if (re !== null && re > 3) return "ice_giant";
+  if (me !== null && me > 12 && (re === null || re < 6)) return "ice_giant";
+  if (summary.includes("冰巨") || summary.includes("海王星") || summary.includes("甲烷")) return "ice_giant";
+
+  if ((re !== null && re > 1.6) || (me !== null && me > 5)) return "mini_neptune";
+  if (summary.includes("迷你海王星") || summary.includes("亚巨")) return "mini_neptune";
+
+  if (summary.includes("熔岩") || summary.includes("2700") || summary.includes("460")) return "lava";
+  if (name.includes("venus") || name.includes("金星") || summary.includes("co₂ 大气") || summary.includes("金星")) return "venus";
+  if (name.includes("mars") || name.includes("火星") || summary.includes("稀薄") || summary.includes("干燥")) return "mars";
+  if (name.includes("mercury") || name.includes("水星") || summary.includes("铁核") || summary.includes("无大气")) return "mercury";
+
+  if (body.habitable || summary.includes("宜居") || summary.includes("液态水") || summary.includes("生态")) return "earth";
+  if (summary.includes("冰") || summary.includes("冷") || summary.includes("冻")) return "ice";
+
+  return "rocky";
+}
+
+function classifyMoon(body) {
+  const summary = String(body.summary || "").replace(/[_*~]/g, "").toLowerCase();
+  const name = String(body.name || "").replace(/[_*~]/g, "").toLowerCase();
+  if (summary.includes("冰壳") || summary.includes("冰下") || name.includes("europa") || name.includes("欧罗巴") || name.includes("盖尼米得") || name.includes("ganymede")) return "icy_moon";
+  if (summary.includes("大气层") || summary.includes("甲烷湖") || name.includes("titan") || name.includes("泰坦")) return "atmo_moon";
+  if (summary.includes("火山") || summary.includes("活跃")) return "volcanic_moon";
+  return "rocky_moon";
+}
+
+function bodyColorRich(body) {
+  if (body.bodyType === "star") {
+    const clean = String(body.summary || "").replace(/[_*~]/g, "");
+    const specMatch = clean.match(/([OBAFGKMLTY]\d)/i);
+    return starColorFromSpec(specMatch ? specMatch[1] : clean || body.radiusLabel);
+  }
+  if (body.bodyType === "brown_dwarf") return 0x8b3a3a;
+  if (body.bodyType === "belt") return 0xa8a090;
+  if (body.bodyType === "station") return 0x72d6c9;
+  if (body.bodyType === "cloud") return 0x74c0d8;
+  if (body.bodyType === "moon") {
+    const mc = classifyMoon(body);
+    return { icy_moon: 0xb8d4e8, atmo_moon: 0xd4a862, volcanic_moon: 0xe86040, rocky_moon: 0xc8c0b4 }[mc];
+  }
+  const pc = classifyPlanet(body);
+  return {
+    gas_giant: 0xd4a050,
+    ice_giant: 0x5888c8,
+    mini_neptune: 0x6ea8b8,
+    lava: 0xff4820,
+    venus: 0xe8c060,
+    mars: 0xc86030,
+    mercury: 0x988888,
+    earth: 0x4898d0,
+    ice: 0xa8c8e0,
+    rocky: 0xb0a898
+  }[pc] ?? 0xcbd5e1;
+}
+
+function bodyRadiusRich(body) {
+  if (body.bodyType === "belt") return 0.08;
+  if (body.bodyType === "station") return 0.14;
+  if (body.bodyType === "cloud") return 0.22;
+  if (body.bodyType === "brown_dwarf") return 0.36;
+
+  const re = parseRadius(body.radiusLabel);
+  if (body.bodyType === "star") {
+    const base = 0.28;
+    if (re !== null) return base + Math.min(re / 109.2, 1) * 0.32;
+    return 0.38;
+  }
+  if (body.bodyType === "moon") {
+    const base = 0.09;
+    if (re !== null) return base + Math.min(re / 2, 1) * 0.06;
+    return 0.11;
+  }
+  const pc = classifyPlanet(body);
+  const mins = { gas_giant: 0.26, ice_giant: 0.22, mini_neptune: 0.19, lava: 0.13, venus: 0.16, mars: 0.14, mercury: 0.12, earth: 0.17, ice: 0.14, rocky: 0.14 };
+  const base = mins[pc] ?? 0.15;
+  if (re !== null) {
+    if (pc === "gas_giant") return base + Math.min(re / 15, 1) * 0.16;
+    if (pc === "ice_giant") return base + Math.min(re / 8, 1) * 0.10;
+    return base + Math.min(re / 3, 1) * 0.06;
+  }
+  return base;
 }
 
 function bodyColor(bodyType) {
@@ -1106,8 +1255,8 @@ async function openSystemView(value = selectedStar?.id) {
       return;
     }
     const angle = index * 1.78 + (star.id.length % 7);
-    const radius = body.bodyType === "star" ? 0.18 : bodyRadius(body.bodyType, body.habitable);
-    const color = body.bodyType === "star" ? bodyColor("star") : bodyColor(body.bodyType);
+    const color = bodyColorRich(body);
+    const radius = bodyRadiusRich(body);
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(radius, 24, 16),
       new THREE.MeshBasicMaterial({ color, transparent: true, opacity: body.bodyType === "cloud" ? 0.45 : 1 })
@@ -1119,6 +1268,37 @@ async function openSystemView(value = selectedStar?.id) {
     bodyMeshes.push(mesh);
     bodyMeshById.set(body.id, mesh);
 
+    if (body.bodyType === "star") {
+      const glowColor = new THREE.Color(color);
+      const innerGlow = new THREE.Mesh(
+        new THREE.SphereGeometry(radius * 1.35, 32, 24),
+        new THREE.MeshBasicMaterial({ color: glowColor, transparent: true, opacity: 0.25, depthWrite: false })
+      );
+      innerGlow.position.copy(mesh.position);
+      scaleRoot.add(innerGlow);
+      const outerGlow = new THREE.Mesh(
+        new THREE.RingGeometry(radius * 1.1, radius * 2.8, 48),
+        new THREE.MeshBasicMaterial({ color: glowColor, transparent: true, opacity: 0.13, side: THREE.DoubleSide, depthWrite: false })
+      );
+      outerGlow.position.copy(mesh.position);
+      outerGlow.userData.followCamera = true;
+      scaleRoot.add(outerGlow);
+    }
+
+    const pc = body.bodyType === "planet" ? classifyPlanet(body) : null;
+    if (pc === "gas_giant" && radius > 0.28) {
+      const ringInner = radius * 1.4;
+      const ringOuter = radius * 2.2;
+      const saturnRing = new THREE.Mesh(
+        new THREE.RingGeometry(ringInner, ringOuter, 64),
+        new THREE.MeshBasicMaterial({ color: new THREE.Color(color).lerp(new THREE.Color(0xffffff), 0.3), transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false })
+      );
+      saturnRing.position.copy(mesh.position);
+      saturnRing.rotation.x = -Math.PI * 0.38;
+      saturnRing.rotation.z = Math.PI * 0.08;
+      scaleRoot.add(saturnRing);
+    }
+
     const infoRadius = controlRadius(body);
     if (infoRadius > 0) {
       const csGeometry = new THREE.SphereGeometry(infoRadius, 32, 24);
@@ -1128,7 +1308,8 @@ async function openSystemView(value = selectedStar?.id) {
       scaleRoot.add(controlSphere);
     }
 
-    const label = makeTextSprite(body.name, body.bodyType === "star" ? "#fff0a8" : "#edf3f8", 19);
+    const labelColor = body.bodyType === "star" ? "#" + new THREE.Color(color).getHexString() : "#edf3f8";
+    const label = makeTextSprite(body.name, labelColor, 19);
     label.scale.multiplyScalar(labelInvScale);
     label.position.copy(mesh.position).add(new THREE.Vector3(0, radius + 0.34, 0));
     scaleRoot.add(label);
@@ -1138,7 +1319,8 @@ async function openSystemView(value = selectedStar?.id) {
     const parentMesh = moon.parentId ? bodyMeshById.get(moon.parentId) : null;
     const moonOrbitRadius = 0.35 + moonIdx * 0.22 + Math.log10(Number(moon.orbitAu || 0.01) * 9 + 1) * 0.6;
     const moonAngle = moonIdx * 2.4 + 0.5;
-    const radius = bodyRadius("moon", moon.habitable);
+    const radius = bodyRadiusRich(moon);
+    const moonColor = bodyColorRich(moon);
 
     if (parentMesh) {
       const orbit = makeOrbit(moonOrbitRadius, 0xd5dce8);
@@ -1146,7 +1328,7 @@ async function openSystemView(value = selectedStar?.id) {
       scaleRoot.add(orbit);
       const mesh = new THREE.Mesh(
         new THREE.SphereGeometry(radius, 16, 12),
-        new THREE.MeshBasicMaterial({ color: bodyColor("moon") })
+        new THREE.MeshBasicMaterial({ color: moonColor })
       );
       mesh.position.set(
         parentMesh.position.x + Math.cos(moonAngle) * moonOrbitRadius,
@@ -1172,7 +1354,7 @@ async function openSystemView(value = selectedStar?.id) {
       const angle = globalIdx * 1.78 + (star.id.length % 7);
       const mesh = new THREE.Mesh(
         new THREE.SphereGeometry(radius, 16, 12),
-        new THREE.MeshBasicMaterial({ color: bodyColor("moon") })
+        new THREE.MeshBasicMaterial({ color: moonColor })
       );
       mesh.position.set(Math.cos(angle) * orbitRadius, 0, Math.sin(angle) * orbitRadius);
       mesh.userData.body = moon;
@@ -1191,8 +1373,18 @@ async function openSystemView(value = selectedStar?.id) {
   const systemExtent = maxOrbit * systemScale;
   const zoomDist = systemExtent * 2.8;
   camera.position.set(center.x, center.y + zoomDist * 0.92, center.z + zoomDist * 0.4);
-  starLayer.visible = false;
-  labelLayer.visible = false;
+  stars.forEach((s) => {
+    if (s.id === star.id) return;
+    s.mesh.scale.setScalar(0.06);
+    s.mesh.material.opacity = 0.5;
+    s.mesh.material.transparent = true;
+    if (s.halo) s.halo.visible = false;
+    if (s.controlSphere) s.controlSphere.visible = false;
+    if (s.label) {
+      s.label.visible = showLabels.checked;
+      s.label.material.opacity = 0.4;
+    }
+  });
   territoryLayer.visible = false;
   showDetails(star);
   writeAgentOutput({ action: "openSystem", id: star.id, bodies: payload.bodies.length });
@@ -1615,6 +1807,11 @@ function animate() {
   stars.forEach((star) => {
     if (star.halo) star.halo.quaternion.copy(camera.quaternion);
   });
+  if (activeSystemScaleRoot) {
+    activeSystemScaleRoot.traverse((child) => {
+      if (child.userData.followCamera) child.quaternion.copy(camera.quaternion);
+    });
+  }
   renderer.render(scene, camera);
 }
 
