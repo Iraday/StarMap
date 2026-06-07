@@ -260,7 +260,7 @@ def clamp_score(value) -> float:
         number = float(value)
     except (TypeError, ValueError):
         return 0.0
-    return max(0.0, min(1.0, number))
+    return max(0.0, number)
 
 
 def explicit_score(item: dict) -> float | None:
@@ -318,22 +318,6 @@ def infer_terraform_status(item: dict) -> str:
     explicit = item.get("terraformStatus", item.get("terraform_status", ""))
     if explicit not in (None, ""):
         return str(explicit)
-    if not is_planetary_body(item) or is_non_terrestrial_planet(item):
-        return ""
-    text = body_text(item)
-    lower = text.casefold()
-    if "地球" in text and str(item.get("id", "")).casefold() == "earth":
-        return "natural_habitable"
-    if any(term in text for term in ("天生类地", "天然类地", "第一宜居", "主居住地")):
-        return "natural_habitable"
-    if any(term in text for term in ("已地球化", "完成地球化", "成熟地球化")):
-        return "terraformed"
-    if any(term in text for term in ("半地球化", "地球化未完工", "地球化中", "改造工程", "穹顶", "浮空文明")):
-        return "terraforming"
-    if any(term in text for term in ("可改造", "准宜居", "候选", "温和", "宜居带", "液态水", "富水", "冰下海洋")):
-        return "terraformable"
-    if "habitable" in lower or int(item.get("habitable", 0) or 0):
-        return "habitable"
     return ""
 
 
@@ -341,27 +325,14 @@ def infer_habitability_score(item: dict) -> float:
     explicit = explicit_score(item)
     if explicit is not None:
         return explicit
-    if not is_planetary_body(item) or is_non_terrestrial_planet(item):
-        return 0.0
-    if str(item.get("id", "")).casefold() == "earth" or strip_markup(item.get("name", "")) == "地球":
-        return 1.0
-    status = infer_terraform_status(item)
-    if status == "natural_habitable":
-        return 0.92
-    if status == "terraformed":
-        return 0.86
-    if status == "terraforming":
-        return 0.64
-    if status == "terraformable":
-        return 0.42
-    if status == "habitable":
-        return 0.72
     return 0.0
 
 
 def normalize_star_seed(raw: dict) -> dict:
     star = dict(raw)
     star.update(STAR_OVERRIDES.get(star["id"], {}))
+    if star.get("faction") == "无/无所属":
+        star["rank"] = "-"
     class_name = star.get("className", star.get("class_name", "unknown"))
     star.setdefault("objectType", "star_system")
     star.setdefault("spectralClass", first_spectral_token(class_name))
@@ -473,53 +444,181 @@ def terraform_orbit(star: dict, slot: int) -> float:
     return round(base * (1.0 + slot * 0.55), 4)
 
 
-def generated_terraform_body(star: dict, existing_ids: set[str], slot: int, sort_order: int) -> dict:
+def numeric_rank(star: dict) -> int | None:
+    try:
+        return int(str(star.get("rank", "")).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def ranked_controlled(star: dict) -> bool:
+    rank = numeric_rank(star)
+    faction = str(star.get("faction", ""))
+    normalized_faction = faction.replace("/", "")
+    return (
+        rank is not None
+        and 1 <= rank < 900
+        and "无所属" not in normalized_faction
+        and star.get("objectType") != "diffuse_cloud"
+    )
+
+
+def score_for_generated_moon(rank: int, slot: int, remaining: float) -> tuple[str, float]:
+    if rank <= 5:
+        cycle = [("terraformed", 1.45), ("terraforming", 1.12), ("terraformable", 0.72)]
+    elif rank <= 10:
+        cycle = [("terraformed", 1.18), ("terraforming", 0.92), ("terraformable", 0.60)]
+    else:
+        cycle = [("terraforming", 0.82), ("terraformable", 0.58), ("terraformable", 0.42)]
+    status, default_score = cycle[slot % len(cycle)]
+    score = default_score if remaining > default_score else max(0.36, remaining)
+    return status, round(score, 3)
+
+
+def terraform_status_cn(status: str) -> str:
+    return {
+        "terraformed": "已地球化",
+        "terraforming": "地球化中",
+        "terraformable": "可地球化",
+        "natural_habitable": "天然宜居",
+        "habitable": "宜居/准宜居",
+    }.get(status, "可地球化")
+
+
+def choose_moon_parent(bodies: list[dict]) -> dict | None:
+    planets = [body for body in bodies if str(body.get("bodyType")) == "planet"]
+    if not planets:
+        return None
+    for body in planets:
+        if is_non_terrestrial_planet(body):
+            return body
+    return planets[-1]
+
+
+def generated_terraform_moon(star: dict, bodies: list[dict], existing_ids: set[str], slot: int, sort_order: int, status: str, score: float) -> dict:
     star_name = clean_name(star.get("short") or star.get("name"))
     faction = clean_name(star.get("faction", "未知势力"))
-    status = "terraforming" if slot == 0 else "terraformable"
-    label = "地球化中" if status == "terraforming" else "可地球化"
-    score = 0.66 if status == "terraforming" else 0.44
-    suffix = "terraforming" if slot == 0 else "terraformable"
-    body_id = f"{star['id']}-{suffix}"
-    if body_id in existing_ids:
-        body_id = f"{body_id}-{slot + 1}"
+    label = terraform_status_cn(status)
+    parent = choose_moon_parent(bodies)
+    parent_id = parent.get("id") if parent else None
+    parent_name = clean_name(parent.get("name")) if parent else "未建模母行星"
+    body_id = f"{star['id']}-fictional-moon-{slot + 1:02d}"
+    while body_id in existing_ids:
+        slot += 1
+        body_id = f"{star['id']}-fictional-moon-{slot + 1:02d}"
+    orbit = float(parent.get("orbitAu", 0) or 0) + 0.001 * (slot + 1) if parent else terraform_orbit(star, slot)
     return {
         "id": body_id,
-        "name": f"_{star_name}{'半成界' if slot == 0 else '可塑界'}_",
-        "parentId": None,
-        "bodyType": "planet",
-        "orbitAu": terraform_orbit(star, slot),
-        "radiusLabel": f"_0.8-1.3 R⊕；{label}类地/冰岩行星_",
-        "massLabel": "_0.5-1.8 M⊕_",
+        "name": f"_{star_name}卫{slot + 1:02d}_",
+        "parentId": parent_id,
+        "bodyType": "moon",
+        "orbitAu": round(orbit, 5),
+        "radiusLabel": f"_小型卫星；{label}冰岩/类地改造对象_",
+        "massLabel": "_0.01-0.25 M⊕_",
         "habitable": 1,
         "terraformStatus": status,
         "habitabilityScore": score,
-        "summary": f"_{faction}在{star_name}控制区登记的{label}殖民/改造对象，用于 2350 年势力版图的后续扩张设定。_",
+        "summary": f"_虚构天体：{faction}在{star_name}控制区登记的{label}卫星，母体为{parent_name}；因尺寸较小，现实观测暂不列入，仅用于 2350 年势力版图设定与后续细化。_",
         "sortOrder": sort_order,
-        "rule_info_time": 0.08 if status == "terraforming" else 0.05,
+        "rule_info_time": 0.10 if status == "terraformed" else 0.08 if status == "terraforming" else 0.05,
         "info_speed": float(star.get("info_speed", 1) or 1),
         "ftl_speed": float(star.get("ftl_speed", 1) or 1),
     }
 
 
-def enrich_controlled_system(star: dict, bodies: list[dict]) -> list[dict]:
-    faction = str(star.get("faction", ""))
-    if not faction or faction == "无/无所属" or star.get("objectType") == "diffuse_cloud":
-        return bodies
+def add_generated_moon(star: dict, bodies: list[dict], slot: int, status: str, score: float) -> dict:
     existing_ids = {str(body.get("id", "")) for body in bodies}
-    scored = [body for body in bodies if infer_habitability_score(body) >= 0.35]
-    if len(scored) >= 2:
-        return bodies
     max_sort = max([int(body.get("sortOrder", 0) or 0) for body in bodies] or [0])
-    enriched = list(bodies)
-    for slot in range(2):
-        if len(scored) >= 2:
-            break
-        candidate = generated_terraform_body(star, existing_ids, slot, max_sort + 10 + slot)
-        existing_ids.add(candidate["id"])
-        enriched.append(candidate)
-        scored.append(candidate)
-    return enriched
+    moon = generated_terraform_moon(star, bodies, existing_ids, slot, max_sort + 10 + slot, status, score)
+    bodies.append(moon)
+    return moon
+
+
+def rank_target(rank: int) -> float:
+    return max(6.0, 36.0 - rank * 1.8)
+
+
+def balance_faction_habitability(stars: list[dict], bodies_by_star: dict[str, list[dict]]) -> None:
+    faction_rank: dict[str, int] = {}
+    for star in stars:
+        if ranked_controlled(star):
+            faction = str(star["faction"])
+            rank = numeric_rank(star)
+            if rank is not None:
+                faction_rank[faction] = min(faction_rank.get(faction, rank), rank)
+    if not faction_rank:
+        return
+
+    faction_stars: dict[str, list[dict]] = {faction: [] for faction in faction_rank}
+    for star in stars:
+        faction = str(star.get("faction", ""))
+        if faction in faction_stars and star.get("objectType") != "diffuse_cloud":
+            faction_stars[faction].append(star)
+
+    faction_base = {
+        faction: sum(
+            infer_habitability_score(body)
+            for star in members
+            for body in bodies_by_star[star["id"]]
+        )
+        for faction, members in faction_stars.items()
+    }
+    current_by_faction = dict(faction_base)
+    slot_by_faction = {faction: {star["id"]: 0 for star in members} for faction, members in faction_stars.items()}
+
+    for faction, members in sorted(faction_stars.items(), key=lambda item: faction_rank[item[0]]):
+        rank = faction_rank[faction]
+        members = sorted(members, key=lambda star: (float(star.get("distance", 0) or 0), str(star.get("id", ""))))
+
+        for star in members:
+            # Never auto-generate moons for hand-crafted fictional stars
+            if star.get("id") == "li-hartman":
+                slot_by_faction[faction][star["id"]] = 999  # mark as skip
+                continue
+            bodies = bodies_by_star[star["id"]]
+            generated = sum(1 for body in bodies if str(body.get("id", "")).startswith(f"{star['id']}-fictional-moon-"))
+            slot_by_faction[faction][star["id"]] = generated
+            while generated < 2:
+                status, score = score_for_generated_moon(rank, slot_by_faction[faction][star["id"]], 99)
+                add_generated_moon(star, bodies, slot_by_faction[faction][star["id"]], status, score)
+                current_by_faction[faction] += score
+                generated += 1
+                slot_by_faction[faction][star["id"]] += 1
+
+    factions_by_rank: dict[int, list[str]] = {}
+    for faction, rank in faction_rank.items():
+        factions_by_rank.setdefault(rank, []).append(faction)
+
+    rank_targets: dict[int, float] = {}
+    lower_max = 0.0
+    for rank in sorted(factions_by_rank.keys(), reverse=True):
+        current_max = max(current_by_faction[faction] for faction in factions_by_rank[rank])
+        rank_targets[rank] = max(rank_target(rank), current_max, lower_max + 1.0)
+        lower_max = rank_targets[rank]
+
+    for faction, members in sorted(faction_stars.items(), key=lambda item: faction_rank[item[0]]):
+        rank = faction_rank[faction]
+        members = sorted(members, key=lambda star: (float(star.get("distance", 0) or 0), str(star.get("id", ""))))
+        current = current_by_faction[faction]
+        slot_by_star = slot_by_faction[faction]
+
+        target = rank_targets[rank]
+        cursor = 0
+        MAX_MOONS_PER_STAR = 4  # hard cap: no more than 4 generated moons per star
+        while current + 0.001 < target and members:
+            star = members[cursor % len(members)]
+            # Skip hand-crafted stars and stars that hit the moon cap
+            if slot_by_star[star["id"]] >= MAX_MOONS_PER_STAR:
+                cursor += 1
+                if cursor >= len(members) * MAX_MOONS_PER_STAR:
+                    break
+                continue
+            remaining = target - current
+            status, score = score_for_generated_moon(rank, slot_by_star[star["id"]], remaining)
+            add_generated_moon(star, bodies_by_star[star["id"]], slot_by_star[star["id"]], status, score)
+            current += score
+            slot_by_star[star["id"]] += 1
+            cursor += 1
 
 
 def update_star_body_stats(star: dict, bodies: list[dict]) -> None:
@@ -637,7 +736,7 @@ def iter_bodies(star: dict):
         item["terraformStatus"] = infer_terraform_status(item)
         item["habitabilityScore"] = infer_habitability_score(item)
         items.append(item)
-    yield from enrich_controlled_system(star, items)
+    yield from items
 
 
 def initialize_database(db_path: Path = DEFAULT_DB, app_path: Path = DEFAULT_APP, force: bool = False) -> int:
@@ -655,6 +754,8 @@ def initialize_database(db_path: Path = DEFAULT_DB, app_path: Path = DEFAULT_APP
             pass
 
     stars = load_all_seed_stars(app_path)
+    bodies_by_star = {star["id"]: list(iter_bodies(star)) for star in stars}
+    balance_faction_habitability(stars, bodies_by_star)
 
     with sqlite3.connect(db_path) as con:
         con.execute("PRAGMA foreign_keys = ON")
@@ -672,7 +773,7 @@ def initialize_database(db_path: Path = DEFAULT_DB, app_path: Path = DEFAULT_APP
         con.execute("DELETE FROM stars")
 
         for star in stars:
-            star_bodies = list(iter_bodies(star))
+            star_bodies = bodies_by_star[star["id"]]
             update_star_body_stats(star, star_bodies)
             x, y, z = star["xyz"]
             con.execute(
