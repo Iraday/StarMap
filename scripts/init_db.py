@@ -464,14 +464,15 @@ def ranked_controlled(star: dict) -> bool:
 
 
 def score_for_generated_moon(rank: int, slot: int, remaining: float) -> tuple[str, float]:
+    # Scores capped at 1.0: terraformed<=0.82, terraforming<=0.62, terraformable<=0.42
     if rank <= 5:
-        cycle = [("terraformed", 1.45), ("terraforming", 1.12), ("terraformable", 0.72)]
+        cycle = [("terraformed", 0.82), ("terraforming", 0.62), ("terraformable", 0.42)]
     elif rank <= 10:
-        cycle = [("terraformed", 1.18), ("terraforming", 0.92), ("terraformable", 0.60)]
+        cycle = [("terraformed", 0.75), ("terraforming", 0.55), ("terraformable", 0.38)]
     else:
-        cycle = [("terraforming", 0.82), ("terraformable", 0.58), ("terraformable", 0.42)]
+        cycle = [("terraforming", 0.58), ("terraformable", 0.40), ("terraformable", 0.32)]
     status, default_score = cycle[slot % len(cycle)]
-    score = default_score if remaining > default_score else max(0.36, remaining)
+    score = default_score if remaining > default_score else max(0.22, remaining)
     return status, round(score, 3)
 
 
@@ -535,7 +536,8 @@ def add_generated_moon(star: dict, bodies: list[dict], slot: int, status: str, s
 
 
 def rank_target(rank: int) -> float:
-    return max(6.0, 36.0 - rank * 1.8)
+    # Sane targets: rank 1 ~15, rank 5 ~10, rank 10 ~5, rank 15 ~2
+    return max(2.0, 16.0 - rank * 1.1)
 
 
 def balance_faction_habitability(stars: list[dict], bodies_by_star: dict[str, list[dict]]) -> None:
