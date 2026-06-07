@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import sqlite3
 import sys
+from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -15,6 +17,8 @@ from scripts.seed_data import FACTION_COLORS, TIMELINE_MARKS
 
 ROOT = Path(__file__).resolve().parent
 DB_PATH = ROOT / "data" / "stars.sqlite"
+SAVE_DIR = ROOT / "saves"
+SAVE_SCHEMA_VERSION = 1
 
 
 def connect() -> sqlite3.Connection:
@@ -23,6 +27,27 @@ def connect() -> sqlite3.Connection:
     con.execute("PRAGMA foreign_keys = ON")
     con.execute("PRAGMA journal_mode = MEMORY")
     return con
+
+
+def save_slug(name: str) -> str:
+    slug = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff._-]+", "-", str(name or "").strip()).strip(".-_")
+    return slug[:80] or "starmap-save"
+
+
+def save_path(name: str) -> Path:
+    SAVE_DIR.mkdir(parents=True, exist_ok=True)
+    path = (SAVE_DIR / f"{save_slug(name)}.json").resolve()
+    if SAVE_DIR.resolve() not in path.parents:
+        raise ValueError("Invalid save name")
+    return path
+
+
+def read_save(path: Path) -> dict:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    schema = int(payload.get("schemaVersion", 0) or 0)
+    if schema != SAVE_SCHEMA_VERSION:
+        raise ValueError(f"Save version incompatible: expected {SAVE_SCHEMA_VERSION}, got {schema or 'unknown'}")
+    return payload
 
 
 def row_to_star(row: sqlite3.Row) -> dict:
@@ -205,6 +230,9 @@ class StarMapHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/system-bodies":
             self.handle_add_body()
             return
+        if parsed.path == "/api/saves":
+            self.handle_save_state()
+            return
         self.send_json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
 
     def send_json(self, payload: dict | list, status: HTTPStatus = HTTPStatus.OK) -> None:
@@ -245,8 +273,25 @@ class StarMapHandler(SimpleHTTPRequestHandler):
                     self.send_json(self.api_nearest(con, params))
                 elif path == "/api/zoom-target":
                     self.send_json(self.api_zoom(con, params))
+                elif path == "/api/saves":
+                    if params.get("name", [""])[0]:
+                        self.send_json(self.api_load_save(params))
+                    else:
+                        self.send_json(self.api_list_saves())
                 else:
                     self.send_json({"error": "Unknown API path", "path": path}, HTTPStatus.NOT_FOUND)
+        except FileNotFoundError as exc:
+            self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.NOT_FOUND)
+        except ValueError as exc:
+            self.send_json(
+                {
+                    "ok": False,
+                    "compatible": False,
+                    "expectedSchemaVersion": SAVE_SCHEMA_VERSION,
+                    "error": str(exc),
+                },
+                HTTPStatus.CONFLICT,
+            )
         except Exception as exc:
             self.send_json({"error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
@@ -424,6 +469,69 @@ class StarMapHandler(SimpleHTTPRequestHandler):
         camera_distance = float(params.get("distance", ["24"])[0])
         return zoom_payload(star, camera_distance)
 
+    def api_list_saves(self) -> list[dict]:
+        SAVE_DIR.mkdir(parents=True, exist_ok=True)
+        saves = []
+        for path in sorted(SAVE_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                payload = {}
+            schema = int(payload.get("schemaVersion", 0) or 0)
+            stat = path.stat()
+            saves.append(
+                {
+                    "name": payload.get("name") or path.stem,
+                    "file": path.name,
+                    "savedAt": payload.get("savedAt") or datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+                    "schemaVersion": schema,
+                    "compatible": schema == SAVE_SCHEMA_VERSION,
+                    "size": stat.st_size,
+                }
+            )
+        return saves
+
+    def api_load_save(self, params: dict[str, list[str]]) -> dict:
+        name = params.get("name", [""])[0]
+        path = save_path(unquote(name))
+        if not path.exists():
+            raise FileNotFoundError(f"Save not found: {name}")
+        return read_save(path)
+
+    def handle_save_state(self) -> None:
+        length = int(self.headers.get("Content-Length", "0"))
+        payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        schema = int(payload.get("schemaVersion", 0) or 0)
+        if schema != SAVE_SCHEMA_VERSION:
+            self.send_json(
+                {
+                    "ok": False,
+                    "compatible": False,
+                    "expectedSchemaVersion": SAVE_SCHEMA_VERSION,
+                    "actualSchemaVersion": schema,
+                    "error": f"Save version incompatible: expected {SAVE_SCHEMA_VERSION}, got {schema or 'unknown'}",
+                },
+                HTTPStatus.CONFLICT,
+            )
+            return
+        name = save_slug(payload.get("name") or f"save-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}")
+        payload["name"] = name
+        payload["savedAt"] = datetime.now(timezone.utc).isoformat()
+        payload["schemaVersion"] = SAVE_SCHEMA_VERSION
+        path = save_path(name)
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        self.send_json(
+            {
+                "ok": True,
+                "name": name,
+                "file": path.name,
+                "savedAt": payload["savedAt"],
+                "schemaVersion": SAVE_SCHEMA_VERSION,
+                "compatible": True,
+            },
+            HTTPStatus.CREATED,
+        )
+
     def handle_add_star(self) -> None:
         length = int(self.headers.get("Content-Length", "0"))
         payload = apply_field_aliases(
@@ -592,6 +700,9 @@ def api_docs() -> dict:
             "GET /api/distance?from=gj1002&to=teegarden": "Calculate 3D distance in light years.",
             "GET /api/nearest?from=gj1002&limit=5": "List nearest systems from a given star.",
             "GET /api/zoom-target?star=gj1002": "Return target/camera coordinates for agent-driven zoom.",
+            "GET /api/saves": "List saved map states from the git-ignored saves folder.",
+            "GET /api/saves?name=my-save": "Load one saved map state. Incompatible schema versions return 409 with details.",
+            "POST /api/saves": "Save map view, controls, time, selected objects, and ships into saves/<name>.json.",
             "POST|PUT|PATCH /api/stars": "Add, replace, or partially update a star record. New records need the required star schema; existing records can send only id plus changed fields.",
             "POST|PUT|PATCH /api/system-bodies": "Add, replace, or partially update a clickable body inside a star system. New records need id, starId, name, and bodyType; existing records can send only id plus changed fields.",
         },
@@ -606,6 +717,13 @@ def api_docs() -> dict:
             "window.StarMapAgent.updateStar({id, ...changedFields})",
             "window.StarMapAgent.addBody(payload)",
             "window.StarMapAgent.updateBody({id, ...changedFields})",
+            "window.StarMapAgent.saveState(name)",
+            "window.StarMapAgent.loadState(name)",
+            "window.StarMapAgent.listSaves()",
+            "window.StarMapAgent.deployShip({name, shipClass, locationStarId})",
+            "window.StarMapAgent.moveShip(shipId, destStarId)",
+            "window.StarMapAgent.moveShipToPoint(shipId, [x,y,z])",
+            "window.StarMapAgent.addAsteroid({name, locationStarId, destinationStarId})",
             "window.StarMapAgent.setHabitabilityLabels(trueOrFalse)",
             "window.StarMapAgent.toggleHabitabilityLabels()",
             "window.StarMapAgent.getState()",

@@ -1,43 +1,44 @@
 /**
- * Spaceship system — construction, travel, FTL, relativistic effects
- * All state is held here; app.js calls into this module each frame.
+ * Spaceship system: construction, travel, FTL timing, movable asteroids,
+ * and serializable runtime state for StarMap saves.
  */
 
-// ── Ship class definitions ──────────────────────────────────────────
+export const shipCategories = {
+  starbase: { label: "星港", order: 0 },
+  military: { label: "军事舰队", order: 1 },
+  civilian: { label: "民用舰船", order: 2 },
+  support: { label: "辅助单位", order: 3 },
+  asteroid: { label: "小行星", order: 4 },
+};
+
 export const shipClasses = {
-  satellite:    { label: "卫星",     icon: "🛰", buildDays: 30,   maxSpeed: 0.0001, ftl: false, crew: 0,   mass: 0.5 },
-  shuttle:      { label: "穿梭机",   icon: "🚀", buildDays: 60,   maxSpeed: 0.001,  ftl: false, crew: 4,   mass: 20 },
-  corvette:     { label: "护卫舰",   icon: "⚔",  buildDays: 180,  maxSpeed: 0.05,   ftl: false, crew: 15,  mass: 800 },
-  frigate:      { label: "巡防舰",   icon: "🛡",  buildDays: 365,  maxSpeed: 0.15,   ftl: true,  crew: 80,  mass: 5000 },
-  destroyer:    { label: "驱逐舰",   icon: "💥", buildDays: 540,  maxSpeed: 0.25,   ftl: true,  crew: 200, mass: 12000 },
-  cruiser:      { label: "巡洋舰",   icon: "🔱", buildDays: 730,  maxSpeed: 0.35,   ftl: true,  crew: 500, mass: 45000 },
-  battleship:   { label: "战列舰",   icon: "⚓", buildDays: 1095, maxSpeed: 0.40,   ftl: true,  crew: 1200,mass: 120000 },
-  carrier:      { label: "航母",     icon: "🏗", buildDays: 1460, maxSpeed: 0.30,   ftl: true,  crew: 3000,mass: 250000 },
-  freighter:    { label: "货船",     icon: "📦", buildDays: 300,  maxSpeed: 0.20,   ftl: true,  crew: 25,  mass: 80000 },
-  explorer:     { label: "探索舰",   icon: "🔭", buildDays: 400,  maxSpeed: 0.50,   ftl: true,  crew: 30,  mass: 6000 },
-  colony_ship:  { label: "殖民船",   icon: "🌍", buildDays: 1825, maxSpeed: 0.10,   ftl: true,  crew: 5000,mass: 500000 },
+  satellite: { label: "卫星", icon: "SAT", category: "support", buildDays: 30, maxSpeed: 0.0001, ftl: false, crew: 0, mass: 0.5 },
+  shuttle: { label: "穿梭机", icon: "SH", category: "civilian", buildDays: 60, maxSpeed: 0.001, ftl: false, crew: 4, mass: 20 },
+  construction: { label: "工程船", icon: "ENG", category: "civilian", buildDays: 200, maxSpeed: 0.15, ftl: true, crew: 50, mass: 15000 },
+  science: { label: "科研舰", icon: "SCI", category: "civilian", buildDays: 350, maxSpeed: 0.40, ftl: true, crew: 40, mass: 4000 },
+  corvette: { label: "护卫艇", icon: "CVT", category: "military", buildDays: 180, maxSpeed: 0.05, ftl: false, crew: 15, mass: 800 },
+  frigate: { label: "巡防舰", icon: "FF", category: "military", buildDays: 365, maxSpeed: 0.15, ftl: true, crew: 80, mass: 5000 },
+  destroyer: { label: "驱逐舰", icon: "DD", category: "military", buildDays: 540, maxSpeed: 0.25, ftl: true, crew: 200, mass: 12000 },
+  cruiser: { label: "巡洋舰", icon: "CA", category: "military", buildDays: 730, maxSpeed: 0.35, ftl: true, crew: 500, mass: 45000 },
+  battleship: { label: "战列舰", icon: "BB", category: "military", buildDays: 1095, maxSpeed: 0.40, ftl: true, crew: 1200, mass: 120000 },
+  carrier: { label: "航母", icon: "CVN", category: "military", buildDays: 1460, maxSpeed: 0.30, ftl: true, crew: 3000, mass: 250000 },
+  freighter: { label: "货船", icon: "FR", category: "civilian", buildDays: 300, maxSpeed: 0.20, ftl: true, crew: 25, mass: 80000 },
+  explorer: { label: "探索舰", icon: "EX", category: "civilian", buildDays: 400, maxSpeed: 0.50, ftl: true, crew: 30, mass: 6000 },
+  colony_ship: { label: "殖民船", icon: "COL", category: "civilian", buildDays: 1825, maxSpeed: 0.10, ftl: true, crew: 5000, mass: 500000 },
+  starbase: { label: "星港", icon: "SB", category: "starbase", buildDays: 2000, maxSpeed: 0, ftl: false, crew: 8000, mass: 2000000 },
+  defense_platform: { label: "防御平台", icon: "DP", category: "starbase", buildDays: 600, maxSpeed: 0, ftl: false, crew: 50, mass: 50000 },
+  asteroid: { label: "小行星", icon: "AST", category: "asteroid", buildDays: 0, maxSpeed: 0.001, ftl: false, crew: 0, mass: 10000 },
 };
 
 let nextShipId = 1;
-
-// All ships in the simulation
 export const ships = [];
 
-// ── Relativistic helpers ────────────────────────────────────────────
-
-/** Lorentz factor γ for a given fraction of c */
 export function lorentz(v) {
   if (v <= 0) return 1;
   if (v >= 1) return Infinity;
   return 1 / Math.sqrt(1 - v * v);
 }
 
-/**
- * For a journey at constant `v` (fraction of c),
- * return { coordTimeDays, properTimeDays } for a given distance in light-years.
- * coordTime = what stationary observers see.
- * properTime = what the crew experiences (time dilation).
- */
 export function travelTimes(distanceLy, v) {
   if (v <= 0 || distanceLy <= 0) return { coordTimeDays: Infinity, properTimeDays: Infinity };
   const coordTimeYears = distanceLy / v;
@@ -49,99 +50,182 @@ export function travelTimes(distanceLy, v) {
   };
 }
 
-// ── Ship lifecycle ──────────────────────────────────────────────────
+function clonePoint(point) {
+  if (!point) return null;
+  if (Array.isArray(point)) return point.slice(0, 3).map(Number);
+  return [Number(point.x || 0), Number(point.y || 0), Number(point.z || 0)];
+}
 
-/**
- * Create a ship at a star system (construction begins immediately).
- * @param {object} opts
- * @param {string} opts.name - display name
- * @param {string} opts.shipClass - key into shipClasses
- * @param {string} opts.locationStarId - where to build
- * @param {number} [opts.travelSpeed] - override fraction-of-c cruise speed
- * @param {string} [opts.faction] - owning faction
- * @param {boolean} [opts.instant] - skip construction, deploy immediately
- * @returns {object} the new ship record
- */
-export function createShip(opts) {
-  const cls = shipClasses[opts.shipClass];
-  if (!cls) throw new Error(`Unknown ship class: ${opts.shipClass}`);
-  const id = `ship-${nextShipId++}`;
-  const ship = {
+function distancePoints(a, b) {
+  if (!a || !b) return 0;
+  const pa = clonePoint(a);
+  const pb = clonePoint(b);
+  return Math.hypot(pa[0] - pb[0], pa[1] - pb[1], pa[2] - pb[2]);
+}
+
+function numericIdSuffix(id) {
+  const match = String(id || "").match(/ship-(\d+)$/);
+  return match ? Number(match[1]) : 0;
+}
+
+function stripRuntimeFields(ship) {
+  const { classInfo, mesh, label, trail, ...rest } = ship;
+  return rest;
+}
+
+function hydrateShip(record) {
+  const cls = shipClasses[record.shipClass] || shipClasses.shuttle;
+  const id = record.id || `ship-${nextShipId++}`;
+  return {
     id,
-    name: opts.name || `${cls.label}-${nextShipId}`,
-    shipClass: opts.shipClass,
+    name: record.name || `${cls.label}-${id}`,
+    shipClass: record.shipClass in shipClasses ? record.shipClass : "shuttle",
     classInfo: cls,
-    faction: opts.faction || "",
-    // Location
-    locationStarId: opts.locationStarId,
-    locationBodyId: opts.locationBodyId || null,
-    // State: "building" | "idle" | "traveling" | "arrived"
-    state: opts.instant ? "idle" : "building",
-    // Construction
-    buildStartDay: 0,     // will be set by caller to current sim day
-    buildDurationDays: cls.buildDays,
-    buildProgressFrac: opts.instant ? 1 : 0,
-    // Travel
-    travelSpeed: Math.min(opts.travelSpeed ?? cls.maxSpeed, cls.ftl ? 10 : cls.maxSpeed), // fraction of c (FTL ships can go >1)
-    destinationStarId: null,
-    travelStartDay: 0,
-    travelDurationDays: 0,
-    travelProgressFrac: 0,
-    travelDistanceLy: 0,
-    crewProperTimeDays: 0,   // crew experienced time for current journey
-    crewTotalProperDays: 0,  // cumulative crew proper time across all journeys
-    // 3D
+    faction: record.faction || "",
+    locationStarId: record.locationStarId ?? null,
+    locationBodyId: record.locationBodyId ?? null,
+    locationPoint: clonePoint(record.locationPoint),
+    state: record.state || (cls.buildDays <= 0 ? "idle" : "building"),
+    buildStartDay: Number(record.buildStartDay || 0),
+    buildDurationDays: Number(record.buildDurationDays ?? cls.buildDays),
+    buildProgressFrac: Number(record.buildProgressFrac ?? (cls.buildDays <= 0 ? 1 : 0)),
+    travelSpeed: Number(record.travelSpeed ?? cls.maxSpeed),
+    destinationStarId: record.destinationStarId ?? null,
+    destinationBodyId: record.destinationBodyId ?? null,
+    destinationPoint: clonePoint(record.destinationPoint),
+    destinationLabel: record.destinationLabel || "",
+    destinationKeepsPoint: Boolean(record.destinationKeepsPoint),
+    travelFromPoint: clonePoint(record.travelFromPoint),
+    travelStartDay: Number(record.travelStartDay || 0),
+    travelDurationDays: Number(record.travelDurationDays || 0),
+    travelProgressFrac: Number(record.travelProgressFrac || 0),
+    travelDistanceLy: Number(record.travelDistanceLy || 0),
+    crewProperTimeDays: Number(record.crewProperTimeDays || 0),
+    crewTotalProperDays: Number(record.crewTotalProperDays || 0),
     mesh: null,
     label: null,
     trail: null,
   };
+}
+
+export function createShip(opts) {
+  const cls = shipClasses[opts.shipClass];
+  if (!cls) throw new Error(`Unknown ship class: ${opts.shipClass}`);
+  const id = opts.id || `ship-${nextShipId++}`;
+  const ship = hydrateShip({
+    id,
+    name: opts.name || `${cls.label}-${nextShipId}`,
+    shipClass: opts.shipClass,
+    faction: opts.faction || "",
+    locationStarId: opts.locationStarId,
+    locationBodyId: opts.locationBodyId || null,
+    locationPoint: opts.locationPoint || null,
+    state: opts.instant || cls.buildDays <= 0 ? "idle" : "building",
+    buildStartDay: opts.buildStartDay || 0,
+    buildDurationDays: cls.buildDays,
+    buildProgressFrac: opts.instant || cls.buildDays <= 0 ? 1 : 0,
+    travelSpeed: Math.min(opts.travelSpeed ?? cls.maxSpeed, cls.ftl ? 10 : cls.maxSpeed),
+  });
   ships.push(ship);
   return ship;
 }
 
-/**
- * Command a ship to travel to another star.
- * @param {string} shipId
- * @param {string} destStarId
- * @param {function} distanceFn - (fromId, toId) => distanceLy
- * @param {number} currentSimDay
- * @param {object} [opts]
- * @param {number} [opts.speed] - override travel speed (fraction of c)
- */
-export function commandTravel(shipId, destStarId, distanceFn, currentSimDay, opts = {}) {
-  const ship = ships.find((s) => s.id === shipId);
-  if (!ship) throw new Error(`Ship not found: ${shipId}`);
-  if (ship.state === "building") throw new Error(`Ship ${ship.name} is still under construction`);
-  if (ship.locationStarId === destStarId) throw new Error(`Ship ${ship.name} is already at ${destStarId}`);
+export function createAsteroid(opts) {
+  const ship = createShip({
+    name: opts.name || `小行星-${nextShipId}`,
+    shipClass: "asteroid",
+    locationStarId: opts.locationStarId || null,
+    locationPoint: opts.locationPoint || null,
+    travelSpeed: opts.speed || 0.0001,
+    faction: opts.faction || "",
+    instant: true,
+  });
+  if (opts.destinationStarId && opts.distanceFn && opts.currentSimDay !== undefined) {
+    commandTravel(ship.id, opts.destinationStarId, opts.distanceFn, opts.currentSimDay, { speed: opts.speed || 0.0001 });
+  } else if (opts.destinationPoint && opts.currentSimDay !== undefined) {
+    commandTravelToPoint(ship.id, opts.destinationPoint, opts.currentSimDay, {
+      speed: opts.speed || 0.0001,
+      fromPoint: opts.fromPoint || opts.locationPoint,
+      distanceLy: opts.distanceLy,
+      destinationLabel: opts.destinationLabel,
+    });
+  }
+  return ship;
+}
 
-  const dist = distanceFn(ship.locationStarId, destStarId);
-  if (dist <= 0) throw new Error(`Cannot compute distance from ${ship.locationStarId} to ${destStarId}`);
+function assertCanMove(ship) {
+  if (ship.state === "building") throw new Error(`${ship.name} is still under construction`);
+  if (ship.classInfo.maxSpeed <= 0) throw new Error(`${ship.name} cannot travel`);
+}
 
-  const speed = Math.min(opts.speed ?? ship.travelSpeed, ship.classInfo.ftl ? 999 : ship.classInfo.maxSpeed);
-  const times = travelTimes(dist, speed);
+function startTravel(ship, currentSimDay, destination, opts = {}) {
+  assertCanMove(ship);
+  const speedLimit = ship.classInfo.ftl ? 999 : ship.classInfo.maxSpeed;
+  const speed = Math.min(Number(opts.speed ?? ship.travelSpeed), speedLimit);
+  if (speed <= 0) throw new Error(`${ship.name} has no valid travel speed`);
+
+  const distanceLy = Number(opts.distanceLy ?? destination.distanceLy ?? 0);
+  if (!(distanceLy > 0)) throw new Error(`Cannot compute travel distance for ${ship.name}`);
+  const times = travelTimes(distanceLy, speed);
 
   ship.state = "traveling";
-  ship.destinationStarId = destStarId;
+  ship.destinationStarId = destination.starId ?? null;
+  ship.destinationBodyId = destination.bodyId ?? null;
+  ship.destinationPoint = clonePoint(destination.point);
+  ship.destinationLabel = destination.label || "";
+  ship.destinationKeepsPoint = Boolean(destination.keepPoint);
+  ship.travelFromPoint = clonePoint(opts.fromPoint);
   ship.travelStartDay = currentSimDay;
   ship.travelDurationDays = times.coordTimeDays;
-  ship.travelDistanceLy = dist;
+  ship.travelDistanceLy = distanceLy;
   ship.travelProgressFrac = 0;
   ship.crewProperTimeDays = times.properTimeDays;
   ship.travelSpeed = speed;
   return ship;
 }
 
-/**
- * Tick all ships forward by deltaDays of coordinate time.
- * @param {number} currentSimDay - total sim days elapsed
- * @returns {object[]} events - list of { type, ship } for newly completed actions
- */
+export function commandTravel(shipId, destStarId, distanceFn, currentSimDay, opts = {}) {
+  const ship = ships.find((s) => s.id === shipId);
+  if (!ship) throw new Error(`Ship not found: ${shipId}`);
+  if (ship.locationStarId === destStarId && !ship.locationPoint && ship.state !== "traveling") {
+    throw new Error(`${ship.name} is already at ${destStarId}`);
+  }
+  let distanceLy = Number(opts.distanceLy || 0);
+  if (!(distanceLy > 0) && ship.locationStarId) {
+    distanceLy = distanceFn(ship.locationStarId, destStarId);
+  }
+  return startTravel(ship, currentSimDay, {
+    starId: destStarId,
+    bodyId: opts.destinationBodyId || null,
+    point: opts.destinationPoint || null,
+    label: opts.destinationLabel || destStarId,
+    keepPoint: false,
+    distanceLy,
+  }, { ...opts, distanceLy });
+}
+
+export function commandTravelToPoint(shipId, destinationPoint, currentSimDay, opts = {}) {
+  const ship = ships.find((s) => s.id === shipId);
+  if (!ship) throw new Error(`Ship not found: ${shipId}`);
+  const fromPoint = clonePoint(opts.fromPoint || ship.locationPoint);
+  const point = clonePoint(destinationPoint);
+  const distanceLy = Number(opts.distanceLy || distancePoints(fromPoint, point));
+  return startTravel(ship, currentSimDay, {
+    starId: opts.destinationStarId || null,
+    bodyId: opts.destinationBodyId || null,
+    point,
+    label: opts.destinationLabel || "自由坐标",
+    keepPoint: true,
+    distanceLy,
+  }, { ...opts, fromPoint, distanceLy });
+}
+
 export function tickShips(currentSimDay) {
   const events = [];
   for (const ship of ships) {
     if (ship.state === "building") {
       const elapsed = currentSimDay - ship.buildStartDay;
-      ship.buildProgressFrac = Math.min(elapsed / ship.buildDurationDays, 1);
+      ship.buildProgressFrac = ship.buildDurationDays > 0 ? Math.min(elapsed / ship.buildDurationDays, 1) : 1;
       if (ship.buildProgressFrac >= 1) {
         ship.state = "idle";
         ship.buildProgressFrac = 1;
@@ -149,13 +233,20 @@ export function tickShips(currentSimDay) {
       }
     } else if (ship.state === "traveling") {
       const elapsed = currentSimDay - ship.travelStartDay;
-      ship.travelProgressFrac = Math.min(elapsed / ship.travelDurationDays, 1);
+      ship.travelProgressFrac = ship.travelDurationDays > 0 ? Math.min(elapsed / ship.travelDurationDays, 1) : 1;
       if (ship.travelProgressFrac >= 1) {
         ship.state = "idle";
         ship.travelProgressFrac = 1;
         ship.crewTotalProperDays += ship.crewProperTimeDays;
         ship.locationStarId = ship.destinationStarId;
+        ship.locationBodyId = ship.destinationBodyId;
+        ship.locationPoint = ship.destinationKeepsPoint || ship.destinationBodyId ? clonePoint(ship.destinationPoint) : (ship.destinationStarId ? null : clonePoint(ship.destinationPoint));
         ship.destinationStarId = null;
+        ship.destinationBodyId = null;
+        ship.destinationPoint = null;
+        ship.destinationLabel = "";
+        ship.destinationKeepsPoint = false;
+        ship.travelFromPoint = null;
         events.push({ type: "arrived", ship });
       }
     }
@@ -163,74 +254,107 @@ export function tickShips(currentSimDay) {
   return events;
 }
 
-/**
- * Get current interpolated 3D position for a traveling ship.
- * @param {object} ship
- * @param {function} starPosFn - (starId) => THREE.Vector3
- * @returns {THREE.Vector3|null}
- */
 export function shipWorldPosition(ship, starPosFn) {
-  if (ship.state !== "traveling" || !ship.destinationStarId) return null;
-  const from = starPosFn(ship.locationStarId);
-  const to = starPosFn(ship.destinationStarId);
-  if (!from || !to) return null;
-  const t = ship.travelProgressFrac;
-  return {
-    x: from.x + (to.x - from.x) * t,
-    y: from.y + (to.y - from.y) * t,
-    z: from.z + (to.z - from.z) * t,
-  };
+  if (ship.state === "traveling") {
+    const from = clonePoint(ship.travelFromPoint) || clonePoint(ship.locationPoint) || clonePoint(starPosFn(ship.locationStarId));
+    const to = clonePoint(ship.destinationPoint) || clonePoint(starPosFn(ship.destinationStarId));
+    if (!from || !to) return null;
+    const t = ship.travelProgressFrac;
+    return {
+      x: from[0] + (to[0] - from[0]) * t,
+      y: from[1] + (to[1] - from[1]) * t,
+      z: from[2] + (to[2] - from[2]) * t,
+    };
+  }
+  const parked = clonePoint(ship.locationPoint) || clonePoint(starPosFn(ship.locationStarId));
+  return parked ? { x: parked[0], y: parked[1], z: parked[2] } : null;
 }
 
-/** Remove a ship by id */
 export function removeShip(shipId) {
   const idx = ships.findIndex((s) => s.id === shipId);
   if (idx >= 0) ships.splice(idx, 1);
 }
 
-/** List all ships, optionally filtered */
 export function listShips(filter = {}) {
   return ships.filter((s) => {
     if (filter.state && s.state !== filter.state) return false;
     if (filter.locationStarId && s.locationStarId !== filter.locationStarId) return false;
     if (filter.faction && s.faction !== filter.faction) return false;
     if (filter.shipClass && s.shipClass !== filter.shipClass) return false;
+    if (filter.category && s.classInfo.category !== filter.category) return false;
     return true;
   });
 }
 
-/** Get formatted info for a ship */
 export function shipInfo(ship) {
   const cls = ship.classInfo;
+  const location = ship.locationStarId || (ship.locationPoint ? "自由坐标" : "未知");
+  const destination = ship.destinationStarId || ship.destinationLabel || (ship.destinationPoint ? "自由坐标" : "");
   const info = {
     id: ship.id,
     name: ship.name,
     class: `${cls.icon} ${cls.label}`,
     shipClass: ship.shipClass,
+    category: cls.category,
     faction: ship.faction,
     state: ship.state,
-    location: ship.locationStarId,
+    location,
+    locationStarId: ship.locationStarId,
+    locationBodyId: ship.locationBodyId,
+    locationPoint: clonePoint(ship.locationPoint),
+    destination,
+    destinationStarId: ship.destinationStarId,
+    destinationPoint: clonePoint(ship.destinationPoint),
     crew: cls.crew,
-    maxSpeed: cls.maxSpeed + " c",
+    maxSpeed: `${cls.maxSpeed} c`,
     ftl: cls.ftl,
-    travelSpeed: ship.travelSpeed + " c",
+    travelSpeed: `${ship.travelSpeed} c`,
   };
   if (ship.state === "building") {
-    info.buildProgress = (ship.buildProgressFrac * 100).toFixed(1) + "%";
+    info.buildProgress = `${(ship.buildProgressFrac * 100).toFixed(1)}%`;
     info.buildEtaDays = Math.max(0, ship.buildDurationDays * (1 - ship.buildProgressFrac));
   }
   if (ship.state === "traveling") {
-    info.destination = ship.destinationStarId;
-    info.travelProgress = (ship.travelProgressFrac * 100).toFixed(1) + "%";
+    info.travelProgress = `${(ship.travelProgressFrac * 100).toFixed(1)}%`;
     info.travelEtaDays = Math.max(0, ship.travelDurationDays * (1 - ship.travelProgressFrac));
     info.distanceLy = ship.travelDistanceLy;
-    // Crew proper time
     const gamma = lorentz(ship.travelSpeed);
     const elapsedCoord = ship.travelDurationDays * ship.travelProgressFrac;
-    const elapsedProper = elapsedCoord / gamma;
+    const elapsedProper = gamma === Infinity ? 0 : elapsedCoord / gamma;
     info.crewElapsedDays = elapsedProper;
     info.crewTotalDays = ship.crewTotalProperDays + elapsedProper;
-    info.timeDilation = gamma.toFixed(3) + "×";
+    info.timeDilation = gamma === Infinity ? "FTL" : `${gamma.toFixed(3)}x`;
   }
   return info;
+}
+
+export function getFleetSummary() {
+  const summary = {};
+  for (const [catId, catDef] of Object.entries(shipCategories)) {
+    const catShips = ships.filter((s) => s.classInfo.category === catId);
+    summary[catId] = {
+      ...catDef,
+      total: catShips.length,
+      building: catShips.filter((s) => s.state === "building").length,
+      traveling: catShips.filter((s) => s.state === "traveling").length,
+      idle: catShips.filter((s) => s.state === "idle").length,
+      ships: catShips,
+    };
+  }
+  return summary;
+}
+
+export function serializeShips() {
+  return ships.map(stripRuntimeFields);
+}
+
+export function loadShips(records = []) {
+  ships.splice(0, ships.length);
+  nextShipId = 1;
+  for (const record of records) {
+    const ship = hydrateShip(record);
+    ships.push(ship);
+    nextShipId = Math.max(nextShipId, numericIdSuffix(ship.id) + 1);
+  }
+  return ships;
 }

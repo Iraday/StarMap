@@ -52,6 +52,10 @@ http://127.0.0.1:8765/
 - 如果某恒星拥有宜居带设定 (`hz_inner`, `hz_outer`)，进入内部结构后会渲染发光的**宜居带环**。
 - 如果双击恒星后只有自动生成的占位天体，镜头只会拉近主星；有正式内部结构种子的恒星系会展开缩小主星、行星轨道、卫星和小行星带。双击内部行星/卫星会保持或打开内部结构并选中该天体。
 - Agent 控制台通过下拉菜单选择显示，支持 zoom、距离计算、最近邻、筛选和内部结构查询。
+- 时间默认 `1秒/秒`，空格键暂停/继续；时间面板可用预设或自定义 `年/月/日/时/分/秒` 组合流速。
+- 舰队面板支持舰级选择、部署/建造、选中舰船、跟随、定位和进入相关星系；不同舰级使用不同 3D 形状和短码图标。
+- 选中舰船或小行星后，在星图或星系内部视图中双击右键可下达航行命令；点恒星飞向恒星，点内部天体飞向该天体，点空处飞向当前视平面坐标。
+- 保存/读取面板可保存镜头、筛选项、时间流、当前选中对象、星系视图和舰船状态；保存文件写入 `saves/`，实际 JSON 保存档被 git 忽略。
 
 ## 数据口径
 
@@ -79,6 +83,13 @@ StarMapAgent.filterStars({ objectType: "brown_dwarf" })
 StarMapAgent.filterStars({ minHabitabilityScore: 1.2, terraformStatus: "terraforming" })
 await StarMapAgent.openSystem("li-hartman")
 StarMapAgent.setHabitabilityLabels(false)
+await StarMapAgent.saveState("story-checkpoint")
+await StarMapAgent.loadState("story-checkpoint")
+StarMapAgent.listSaves()
+const ship = StarMapAgent.deployShip({ name: "晨线-01", shipClass: "explorer", locationStarId: "sol" })
+StarMapAgent.moveShip(ship.id, "gj1002")
+StarMapAgent.moveShipToPoint(ship.id, [1, 0, 2], { label: "自由航点" })
+StarMapAgent.addAsteroid({ name: "测试小行星", locationStarId: "sol", destinationStarId: "alpha" })
 await StarMapAgent.addStar({ id: "test", name: "Test" }) // 调用后端创建恒星
 await StarMapAgent.updateStar({ id: "test", habitable: 1 }) // 调用后端更新恒星
 await StarMapAgent.addBody({ id: "test-b", starId: "test", name: "_Test b_", bodyType: "planet", orbitAu: 0.8 })
@@ -100,10 +111,15 @@ GET /api/system?id=li-hartman
 GET /api/distance?from=gj1002&to=teegarden
 GET /api/nearest?from=li-hartman&limit=5
 GET /api/zoom-target?star=gj1002
+GET /api/saves
+GET /api/saves?name=story-checkpoint
 GET /api/docs
+POST /api/saves
 POST|PUT|PATCH /api/stars
 POST|PUT|PATCH /api/system-bodies
 ```
+
+`POST /api/saves` 会检查 `schemaVersion`。版本不兼容时返回 `409` 和结构化错误，前端会在保存/读取面板中显示失败原因。
 
 新增或替换恒星系：
 
@@ -207,6 +223,7 @@ server.py                 本地 HTTP/API 服务
 styles.css                页面布局与控件样式
 index.html                单页入口
 data/stars.sqlite         SQLite 数据库
+saves/                    本地状态保存目录；JSON 保存档被 git 忽略
 scripts/init_db.py        从种子重建/迁移 SQLite
 scripts/seed_data.py      现实恒星补充、设定覆盖、内部天体种子
 Start-StarMap.ps1/.bat    一键安装依赖、初始化数据库并启动网页

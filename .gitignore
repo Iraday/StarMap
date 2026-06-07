@@ -8,3 +8,5 @@ data/write-test.txt
 desktop-check.jpg
 mobile-check.jpg
 reference/
+saves/*
+!saves/.gitkeep

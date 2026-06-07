@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>2350 年人类文明太阳周边 50 光年星图</title>
-    <link rel="stylesheet" href="./styles.css?v=2" />
+    <link rel="stylesheet" href="./styles.css?v=4" />
     <script>
       window.onerror = function(msg, url, line, col, error) {
         console.error('[onerror]', msg, 'at', url + ':' + line + ':' + col, error ? error.stack : '');
@@ -162,9 +162,48 @@
         <span><b>Z+</b> 北银极</span>
       </div>
 
+      <!-- Fleet management panel (bottom-left floating) -->
+      <div id="fleetPanel" class="fleet-panel" aria-label="舰队管理">
+        <button id="fleetPanelToggle" class="fleet-panel-toggle" type="button" title="舰队管理">FLT</button>
+        <div class="fleet-panel-inner">
+          <div class="fleet-panel-header">舰队总览</div>
+          <div id="shipClassPalette" class="ship-class-palette" aria-label="舰级选择"></div>
+          <div class="ship-control-grid" aria-label="舰船控制">
+            <input id="shipNameInput" type="text" placeholder="舰名" />
+            <select id="shipClassSelect" title="舰级"></select>
+            <input id="shipLocationInput" type="text" list="starNames" placeholder="起点恒星系" />
+            <div class="ship-control-buttons">
+              <button id="deployShipBtn" type="button">部署</button>
+              <button id="buildShipBtn" type="button">建造</button>
+            </div>
+            <input id="shipDestinationInput" type="text" list="starNames" placeholder="目的地恒星系" />
+            <button id="moveShipBtn" type="button">航行</button>
+          </div>
+          <div id="fleetCategories" class="fleet-categories"></div>
+        </div>
+      </div>
+
+      <!-- Ship info panel (floating, hideable) -->
+      <div id="shipInfoPanel" class="ship-info-panel" style="display:none" aria-label="舰船信息">
+        <div class="ship-info-header">
+          <span id="shipInfoTitle" class="ship-info-title">舰船信息</span>
+          <button id="shipInfoClose" class="ship-info-close" type="button" title="关闭">✕</button>
+        </div>
+        <div id="shipInfoContent" class="ship-info-content"></div>
+        <div class="ship-info-progress-wrap" id="shipProgressWrap" style="display:none">
+          <div class="ship-info-progress-bar"><div id="shipProgressFill" class="ship-info-progress-fill"></div></div>
+          <span id="shipProgressLabel" class="ship-info-progress-label">0%</span>
+        </div>
+        <div class="ship-info-actions">
+          <button id="shipFollowBtn" type="button" title="跟随">跟随</button>
+          <button id="shipZoomBtn" type="button" title="定位">定位</button>
+          <button id="shipSystemBtn" type="button" title="进入星系">星系</button>
+        </div>
+      </div>
+
       <!-- Floating time control HUD (top-right) -->
       <div id="timeHud" class="time-hud" aria-label="时间控制">
-        <button id="timeHudToggle" class="time-hud-toggle" type="button" title="隐藏/显示时间面板">⏱</button>
+        <button id="timeHudToggle" class="time-hud-toggle" type="button" title="隐藏/显示时间面板">TIME</button>
         <div class="time-hud-inner">
           <div class="time-hud-row">
             <span class="time-label">已过:</span>
@@ -172,21 +211,42 @@
           </div>
           <div class="time-hud-row">
             <span class="time-label">流速:</span>
-            <span id="timeRate" class="time-value">1.0 天/秒</span>
+            <span id="timeRate" class="time-value">1秒/秒</span>
           </div>
           <div class="time-hud-buttons">
-            <button id="timePauseBtn" type="button" title="暂停/继续">⏸</button>
+            <button id="timePauseBtn" type="button" title="暂停/继续">暂停</button>
+            <button data-time-rate="1 sec" type="button">1秒</button>
             <button data-time-rate="1 hour" type="button">1时</button>
             <button data-time-rate="1 day" type="button">1天</button>
             <button data-time-rate="1 month" type="button">1月</button>
             <button data-time-rate="1 year" type="button">1年</button>
             <button data-time-rate="10 year" type="button">10年</button>
-            <button id="timeResetBtn" type="button" title="重置时间">⟲</button>
+            <button id="timeCustomToggle" type="button" title="自定义时间流">自定义</button>
+            <button id="timeResetBtn" type="button" title="重置时间">重置</button>
+          </div>
+          <div id="timeCustomPanel" class="time-custom-panel" style="display:none">
+            <input id="timeYears" type="number" min="0" step="1" value="0" title="年" /><span>年</span>
+            <input id="timeMonths" type="number" min="0" step="1" value="0" title="月" /><span>月</span>
+            <input id="timeDays" type="number" min="0" step="1" value="0" title="日" /><span>日</span>
+            <input id="timeHours" type="number" min="0" step="1" value="0" title="时" /><span>时</span>
+            <input id="timeMinutes" type="number" min="0" step="1" value="0" title="分" /><span>分</span>
+            <input id="timeSeconds" type="number" min="0" step="1" value="0" title="秒" /><span>秒</span>
+            <button id="timeCustomApply" type="button">应用</button>
+          </div>
+          <div class="save-control" aria-label="保存读取">
+            <input id="saveNameInput" type="text" placeholder="保存名" />
+            <select id="saveSelect" title="已有保存"></select>
+            <div class="save-buttons">
+              <button id="saveStateBtn" type="button">保存</button>
+              <button id="loadStateBtn" type="button">读取</button>
+              <button id="refreshSavesBtn" type="button">刷新</button>
+            </div>
+            <div id="saveStatus" class="save-status" aria-live="polite"></div>
           </div>
         </div>
       </div>
     </main>
 
-    <script type="module" src="./app.js?v=8"></script>
+    <script type="module" src="./app.js?v=10"></script>
   </body>
 </html>
