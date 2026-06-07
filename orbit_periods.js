@@ -209,7 +209,7 @@ export const solPeriods = {
   "triton": 5.877,
   "nereid": 360.14,
   // Comets (approximate)
-  "halley": 27510.0,
+  "halley": 27700.0,
   "encke": 1204.0,
   "hale-bopp": 912500.0,
 };

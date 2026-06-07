@@ -72,10 +72,23 @@ while (-not (Test-PortOpen $Port)) {
   $Port += 1
 }
 
+function Get-DbUserVersion([string]$DbPath) {
+  if (-not (Test-Path -LiteralPath $DbPath)) { return -1 }
+  $raw = & $Python -c "import sqlite3, sys; con=sqlite3.connect(sys.argv[1]); print(con.execute('PRAGMA user_version').fetchone()[0])" $DbPath
+  if ($LASTEXITCODE -ne 0) { return -1 }
+  return [int]$raw
+}
+
+$SchemaVersion = [int](& $Python -c "from scripts.init_db import SCHEMA_VERSION; print(SCHEMA_VERSION)")
+$DbVersion = Get-DbUserVersion "data\stars.sqlite"
+
 if ($RebuildDb -or -not (Test-Path -LiteralPath "data\stars.sqlite")) {
   & $Python "scripts\init_db.py" "--force" "--db" "data\stars.sqlite"
-} else {
+} elseif ($DbVersion -lt $SchemaVersion) {
+  Write-Host "SQLite schema v$DbVersion is older than v$SchemaVersion. Migrating/reseeding..." -ForegroundColor Cyan
   & $Python "scripts\init_db.py" "--db" "data\stars.sqlite"
+} else {
+  Write-Host "Using existing SQLite database v$DbVersion." -ForegroundColor DarkCyan
 }
 
 $Url = "http://127.0.0.1:$Port/"

@@ -4,6 +4,8 @@ data/*-journal
 data/test.sqlite
 data/memoryjournal.sqlite
 data/starmap.sqlite
+data/*.sqlite-journal
+data/write_test.tmp
 data/write-test.txt
 desktop-check.jpg
 mobile-check.jpg

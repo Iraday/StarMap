@@ -233,21 +233,6 @@ input {
   line-height: 1.2;
 }
 
-.detail-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.detail-head-text {
-  min-width: 0;
-}
-
-.info-edit-btn {
-  flex-shrink: 0;
-}
-
 .kicker {
   margin: 0 0 5px;
   color: var(--accent);
@@ -596,63 +581,6 @@ button[aria-pressed="true"] {
   margin: 10px 0 0;
   color: var(--muted);
   font-size: 13px;
-}
-
-.info-editor {
-  display: grid;
-  gap: 8px;
-  margin-top: 12px;
-  padding: 10px;
-  border: 1px solid rgba(223, 231, 241, 0.12);
-  border-radius: 8px;
-  background: rgba(4, 10, 18, 0.72);
-}
-
-.info-editor label {
-  display: grid;
-  gap: 4px;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.info-editor input,
-.info-editor textarea {
-  width: 100%;
-  min-width: 0;
-  border: 1px solid var(--panel-border);
-  border-radius: 5px;
-  background: rgba(4, 10, 18, 0.92);
-  color: var(--text);
-  padding: 6px 7px;
-  font: inherit;
-  font-size: 12px;
-}
-
-.info-editor textarea {
-  min-height: 76px;
-  resize: vertical;
-}
-
-.info-editor-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 6px;
-}
-
-.info-editor-actions button {
-  min-height: 28px;
-  border: 1px solid var(--panel-border);
-  border-radius: 5px;
-  background: var(--soft);
-  color: var(--text);
-  cursor: pointer;
-  font-size: 12px;
-}
-
-.info-editor-status {
-  min-height: 16px;
-  color: var(--muted);
-  font-size: 12px;
 }
 
 .hud {
@@ -1512,105 +1440,6 @@ button[aria-pressed="true"] {
 .fleet-row-camera:hover {
   color: var(--accent);
   border-color: rgba(114, 214, 201, 0.55);
-}
-
-.ship-command-panel {
-  position: absolute;
-  top: 420px;
-  right: 18px;
-  z-index: 9;
-  width: min(360px, calc(100vw - 36px));
-  max-height: 45vh;
-  overflow-y: auto;
-  border: 1px solid var(--panel-border);
-  border-radius: 8px;
-  background: var(--panel);
-  backdrop-filter: blur(16px);
-  padding: 10px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.34);
-}
-
-.ship-command-panel.disabled {
-  opacity: 0.48;
-  pointer-events: none;
-}
-
-.ship-command-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 26px;
-  padding-right: 62px;
-  color: var(--accent);
-  font-size: 13px;
-  font-weight: 700;
-  cursor: grab;
-}
-
-#shipCommandToggle {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  z-index: 4;
-}
-
-.route-modifier-hint {
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.35;
-}
-
-.fleet-panel-tools {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.icon-button {
-  display: grid;
-  place-items: center;
-  min-width: 24px;
-  height: 24px;
-  border: 1px solid var(--panel-border);
-  border-radius: 5px;
-  background: rgba(237, 243, 248, 0.06);
-  color: var(--muted);
-  cursor: pointer;
-}
-
-.icon-button.active {
-  color: var(--accent);
-  border-color: rgba(114, 214, 201, 0.65);
-  background: rgba(114, 214, 201, 0.14);
-}
-
-.ship-bulk-panel {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 5px;
-  margin-bottom: 8px;
-  padding: 8px;
-  border: 1px solid rgba(114, 214, 201, 0.14);
-  border-radius: 6px;
-  background: rgba(4, 10, 18, 0.42);
-}
-
-.ship-bulk-panel input,
-.ship-bulk-panel button {
-  min-width: 0;
-  min-height: 28px;
-  border: 1px solid var(--panel-border);
-  border-radius: 5px;
-  background: rgba(4, 10, 18, 0.82);
-  color: var(--text);
-  padding: 4px 6px;
-  font: inherit;
-  font-size: 11px;
-}
-
-.ship-bulk-panel button {
-  background: var(--soft);
-  cursor: pointer;
 }
 
 .command-mode-row {

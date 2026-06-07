@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DB = ROOT / "data" / "stars.sqlite"
 DEFAULT_APP = ROOT / "app.js"
 DEFAULT_STAR_DATA = ROOT / "star_data.js"
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -83,10 +83,25 @@ CREATE TABLE IF NOT EXISTS system_bodies (
   terraform_status TEXT NOT NULL DEFAULT '',
   habitability_score REAL NOT NULL DEFAULT 0,
   summary TEXT NOT NULL DEFAULT '',
+  orbit_perihelion_au REAL,
+  orbit_aphelion_au REAL,
+  eccentricity REAL,
+  inclination_deg REAL,
+  longitude_ascending_node_deg REAL,
+  argument_perihelion_deg REAL,
+  orbital_period_days REAL,
   sort_order INTEGER NOT NULL DEFAULT 0,
   rule_info_time REAL NOT NULL DEFAULT 0,
   info_speed REAL NOT NULL DEFAULT 0,
   ftl_speed REAL NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS ship_info (
+  ship_id TEXT PRIMARY KEY,
+  name TEXT NOT NULL DEFAULT '',
+  faction TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_stars_faction ON stars(faction);
@@ -123,6 +138,13 @@ STAR_COLUMNS = {
 BODY_COLUMNS = {
     "terraform_status": "TEXT NOT NULL DEFAULT ''",
     "habitability_score": "REAL NOT NULL DEFAULT 0",
+    "orbit_perihelion_au": "REAL",
+    "orbit_aphelion_au": "REAL",
+    "eccentricity": "REAL",
+    "inclination_deg": "REAL",
+    "longitude_ascending_node_deg": "REAL",
+    "argument_perihelion_deg": "REAL",
+    "orbital_period_days": "REAL",
 }
 
 
@@ -734,6 +756,13 @@ def iter_bodies(star: dict):
         item.setdefault("massLabel", "")
         item.setdefault("habitable", 0)
         item.setdefault("summary", "")
+        item.setdefault("orbitPerihelionAu", None)
+        item.setdefault("orbitAphelionAu", None)
+        item.setdefault("eccentricity", None)
+        item.setdefault("inclinationDeg", None)
+        item.setdefault("longitudeAscendingNodeDeg", None)
+        item.setdefault("argumentPerihelionDeg", None)
+        item.setdefault("orbitalPeriodDays", None)
         item.setdefault("sortOrder", 0)
         if star.get("id") == "li-hartman" and item.get("summary"):
             item["summary"] = normalize_fiction_text(item["summary"])
@@ -865,10 +894,13 @@ def initialize_database(db_path: Path = DEFAULT_DB, app_path: Path = DEFAULT_APP
                     INSERT INTO system_bodies (
                       id, star_id, parent_id, name, body_type, orbit_au,
                       radius_label, mass_label, habitable, terraform_status,
-                      habitability_score, summary, sort_order,
+                      habitability_score, summary,
+                      orbit_perihelion_au, orbit_aphelion_au, eccentricity,
+                      inclination_deg, longitude_ascending_node_deg,
+                      argument_perihelion_deg, orbital_period_days, sort_order,
                       rule_info_time, info_speed, ftl_speed
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         body["id"],
@@ -883,6 +915,13 @@ def initialize_database(db_path: Path = DEFAULT_DB, app_path: Path = DEFAULT_APP
                         body["terraformStatus"],
                         float(body["habitabilityScore"]),
                         body["summary"],
+                        body.get("orbitPerihelionAu"),
+                        body.get("orbitAphelionAu"),
+                        body.get("eccentricity"),
+                        body.get("inclinationDeg"),
+                        body.get("longitudeAscendingNodeDeg"),
+                        body.get("argumentPerihelionDeg"),
+                        body.get("orbitalPeriodDays"),
                         int(body["sortOrder"]),
                         float(body["rule_info_time"]),
                         float(body["info_speed"]),

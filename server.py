@@ -11,7 +11,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from scripts.init_db import DEFAULT_DB, initialize_database, normalize_alias, normalize_fiction_text
+from scripts.init_db import DEFAULT_DB, SCHEMA_VERSION, initialize_database, normalize_alias, normalize_fiction_text
 from scripts.seed_data import FACTION_COLORS, TIMELINE_MARKS
 
 
@@ -19,6 +19,40 @@ ROOT = Path(__file__).resolve().parent
 DB_PATH = ROOT / "data" / "stars.sqlite"
 SAVE_DIR = ROOT / "saves"
 SAVE_SCHEMA_VERSION = 1
+RUNTIME_SCHEMA_READY = False
+
+BODY_RUNTIME_COLUMNS = {
+    "orbit_perihelion_au": "REAL",
+    "orbit_aphelion_au": "REAL",
+    "eccentricity": "REAL",
+    "inclination_deg": "REAL",
+    "longitude_ascending_node_deg": "REAL",
+    "argument_perihelion_deg": "REAL",
+    "orbital_period_days": "REAL",
+}
+
+
+def ensure_runtime_schema(con: sqlite3.Connection) -> None:
+    global RUNTIME_SCHEMA_READY
+    if RUNTIME_SCHEMA_READY:
+        return
+    body_columns = {row[1] for row in con.execute("PRAGMA table_info(system_bodies)").fetchall()}
+    for column, spec in BODY_RUNTIME_COLUMNS.items():
+        if column not in body_columns:
+            con.execute(f"ALTER TABLE system_bodies ADD COLUMN {column} {spec}")
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS ship_info (
+          ship_id TEXT PRIMARY KEY,
+          name TEXT NOT NULL DEFAULT '',
+          faction TEXT NOT NULL DEFAULT '',
+          notes TEXT NOT NULL DEFAULT '',
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    con.commit()
+    RUNTIME_SCHEMA_READY = True
 
 
 def connect() -> sqlite3.Connection:
@@ -26,6 +60,7 @@ def connect() -> sqlite3.Connection:
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = ON")
     con.execute("PRAGMA journal_mode = MEMORY")
+    ensure_runtime_schema(con)
     return con
 
 
@@ -98,6 +133,11 @@ def row_to_star(row: sqlite3.Row) -> dict:
 
 
 def row_to_body(row: sqlite3.Row) -> dict:
+    keys = set(row.keys())
+
+    def get(key: str, default=None):
+        return row[key] if key in keys else default
+
     return {
         "id": row["id"],
         "starId": row["star_id"],
@@ -111,10 +151,28 @@ def row_to_body(row: sqlite3.Row) -> dict:
         "terraformStatus": row["terraform_status"],
         "habitabilityScore": row["habitability_score"],
         "summary": row["summary"],
+        "orbitPerihelionAu": get("orbit_perihelion_au"),
+        "orbitAphelionAu": get("orbit_aphelion_au"),
+        "eccentricity": get("eccentricity"),
+        "inclinationDeg": get("inclination_deg"),
+        "longitudeAscendingNodeDeg": get("longitude_ascending_node_deg"),
+        "argumentPerihelionDeg": get("argument_perihelion_deg"),
+        "orbitalPeriodDays": get("orbital_period_days"),
         "sortOrder": row["sort_order"],
         "rule_info_time": row["rule_info_time"],
         "info_speed": row["info_speed"],
         "ftl_speed": row["ftl_speed"],
+    }
+
+
+def row_to_ship_info(row: sqlite3.Row) -> dict:
+    return {
+        "id": row["ship_id"],
+        "shipId": row["ship_id"],
+        "name": row["name"],
+        "faction": row["faction"],
+        "notes": row["notes"],
+        "updatedAt": row["updated_at"],
     }
 
 
@@ -230,6 +288,9 @@ class StarMapHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/system-bodies":
             self.handle_add_body()
             return
+        if parsed.path == "/api/ship-info":
+            self.handle_ship_info()
+            return
         if parsed.path == "/api/saves":
             self.handle_save_state()
             return
@@ -263,6 +324,8 @@ class StarMapHandler(SimpleHTTPRequestHandler):
                     self.send_json(self.api_timeline(con))
                 elif path == "/api/system":
                     self.send_json(self.api_system(con, params))
+                elif path == "/api/ship-info":
+                    self.send_json(self.api_ship_info(con, params))
                 elif path == "/api/star":
                     key = params.get("id", params.get("name", [""]))[0]
                     star = find_star(con, key)
@@ -416,6 +479,16 @@ class StarMapHandler(SimpleHTTPRequestHandler):
         ).fetchall()
         bodies = [row_to_body(row) for row in rows]
         return {"star": star, "bodies": bodies}
+
+    def api_ship_info(self, con: sqlite3.Connection, params: dict[str, list[str]]) -> dict | list[dict]:
+        ship_id = params.get("id", params.get("shipId", [""]))[0].strip()
+        if ship_id:
+            row = con.execute("SELECT * FROM ship_info WHERE ship_id = ?", (ship_id,)).fetchone()
+            if row:
+                return row_to_ship_info(row)
+            return {"id": ship_id, "shipId": ship_id, "name": "", "faction": "", "notes": "", "updatedAt": None}
+        rows = con.execute("SELECT * FROM ship_info ORDER BY updated_at DESC, ship_id").fetchall()
+        return [row_to_ship_info(row) for row in rows]
 
     def api_distance(self, con: sqlite3.Connection, params: dict[str, list[str]]) -> dict:
         a = find_star(con, params.get("from", [""])[0])
@@ -641,6 +714,12 @@ class StarMapHandler(SimpleHTTPRequestHandler):
                 "sort_order": "sortOrder",
                 "terraform_status": "terraformStatus",
                 "habitability_score": "habitabilityScore",
+                "orbit_perihelion_au": "orbitPerihelionAu",
+                "orbit_aphelion_au": "orbitAphelionAu",
+                "inclination_deg": "inclinationDeg",
+                "longitude_ascending_node_deg": "longitudeAscendingNodeDeg",
+                "argument_perihelion_deg": "argumentPerihelionDeg",
+                "orbital_period_days": "orbitalPeriodDays",
             },
         )
         with connect() as con:
@@ -659,10 +738,13 @@ class StarMapHandler(SimpleHTTPRequestHandler):
                 INSERT OR REPLACE INTO system_bodies (
                   id, star_id, parent_id, name, body_type, orbit_au,
                   radius_label, mass_label, habitable, terraform_status,
-                  habitability_score, summary, sort_order,
+                  habitability_score, summary,
+                  orbit_perihelion_au, orbit_aphelion_au, eccentricity,
+                  inclination_deg, longitude_ascending_node_deg,
+                  argument_perihelion_deg, orbital_period_days, sort_order,
                   rule_info_time, info_speed, ftl_speed
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record["id"],
@@ -677,6 +759,13 @@ class StarMapHandler(SimpleHTTPRequestHandler):
                     record.get("terraformStatus", record.get("terraform_status", "")),
                     float(record.get("habitabilityScore", record.get("habitability_score", 0)) or 0),
                     record.get("summary", ""),
+                    record.get("orbitPerihelionAu"),
+                    record.get("orbitAphelionAu"),
+                    record.get("eccentricity"),
+                    record.get("inclinationDeg"),
+                    record.get("longitudeAscendingNodeDeg"),
+                    record.get("argumentPerihelionDeg"),
+                    record.get("orbitalPeriodDays"),
                     int(record.get("sortOrder", 0)),
                     float(record.get("rule_info_time", 0.05) or 0.05),
                     float(record.get("info_speed", 1) or 1),
@@ -685,6 +774,33 @@ class StarMapHandler(SimpleHTTPRequestHandler):
             )
             con.commit()
         self.send_json({"ok": True, "body": record}, HTTPStatus.OK if existing else HTTPStatus.CREATED)
+
+    def handle_ship_info(self) -> None:
+        length = int(self.headers.get("Content-Length", "0"))
+        payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        ship_id = str(payload.get("shipId") or payload.get("id") or "").strip()
+        if not ship_id:
+            self.send_json({"error": "Missing required field", "missing": ["shipId"]}, HTTPStatus.BAD_REQUEST)
+            return
+        with connect() as con:
+            existing_row = con.execute("SELECT * FROM ship_info WHERE ship_id = ?", (ship_id,)).fetchone()
+            existing = row_to_ship_info(existing_row) if existing_row else {}
+            record = {
+                "shipId": ship_id,
+                "name": payload.get("name", existing.get("name", "")),
+                "faction": payload.get("faction", existing.get("faction", "")),
+                "notes": payload.get("notes", existing.get("notes", "")),
+            }
+            con.execute(
+                """
+                INSERT OR REPLACE INTO ship_info (ship_id, name, faction, notes, updated_at)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """,
+                (record["shipId"], record["name"] or "", record["faction"] or "", record["notes"] or ""),
+            )
+            con.commit()
+            row = con.execute("SELECT * FROM ship_info WHERE ship_id = ?", (ship_id,)).fetchone()
+        self.send_json({"ok": True, "shipInfo": row_to_ship_info(row)}, HTTPStatus.OK if existing else HTTPStatus.CREATED)
 
 
 def api_docs() -> dict:
@@ -697,6 +813,7 @@ def api_docs() -> dict:
             "GET /api/filter-options": "Return distinct object types, spectral classes, faction types, and planet count range.",
             "GET /api/timeline": "Return available year range and canonical timeline marks.",
             "GET /api/system?id=li-hartman": "Return a star and its internal bodies/orbits.",
+            "GET /api/ship-info?id=ship-1": "Return persisted editable ship metadata stored in SQLite.",
             "GET /api/distance?from=gj1002&to=teegarden": "Calculate 3D distance in light years.",
             "GET /api/nearest?from=gj1002&limit=5": "List nearest systems from a given star.",
             "GET /api/zoom-target?star=gj1002": "Return target/camera coordinates for agent-driven zoom.",
@@ -705,6 +822,7 @@ def api_docs() -> dict:
             "POST /api/saves": "Save map view, controls, time, selected objects, ships, fleets, UI visibility, UI locations, and input mappings into saves/<name>.json.",
             "POST|PUT|PATCH /api/stars": "Add, replace, or partially update a star record. New records need the required star schema; existing records can send only id plus changed fields.",
             "POST|PUT|PATCH /api/system-bodies": "Add, replace, or partially update a clickable body inside a star system. New records need id, starId, name, and bodyType; existing records can send only id plus changed fields.",
+            "POST|PUT|PATCH /api/ship-info": "Persist editable ship display metadata. Body: shipId/id, name, faction, notes.",
         },
         "agentBrowserApi": [
             "window.StarMapAgent.zoomToStar(idOrName)",
@@ -715,8 +833,11 @@ def api_docs() -> dict:
             "window.StarMapAgent.openSystem(idOrName)",
             "window.StarMapAgent.addStar(payload)",
             "window.StarMapAgent.updateStar({id, ...changedFields})",
+            "window.StarMapAgent.editStarInfo(id, fields)",
             "window.StarMapAgent.addBody(payload)",
             "window.StarMapAgent.updateBody({id, ...changedFields})",
+            "window.StarMapAgent.editBodyInfo(id, fields)",
+            "window.StarMapAgent.editShipInfo(shipId, fields)",
             "window.StarMapAgent.saveState(name)",
             "window.StarMapAgent.loadState(name)",
             "window.StarMapAgent.listSaves()",
@@ -731,9 +852,28 @@ def api_docs() -> dict:
     }
 
 
+def ready_database_count(db_path: Path = DB_PATH) -> int | None:
+    if not db_path.exists():
+        return None
+    try:
+        with sqlite3.connect(db_path) as con:
+            version = con.execute("PRAGMA user_version").fetchone()[0]
+            if version < SCHEMA_VERSION:
+                return None
+            count = con.execute("SELECT COUNT(*) FROM stars").fetchone()[0]
+            if count <= 0:
+                return None
+            ensure_runtime_schema(con)
+            return int(count)
+    except sqlite3.Error:
+        return None
+
+
 def main() -> None:
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8765
-    count = initialize_database(DB_PATH)
+    count = ready_database_count(DB_PATH)
+    if count is None:
+        count = initialize_database(DB_PATH)
     server = ThreadingHTTPServer(("127.0.0.1", port), StarMapHandler)
     print(f"StarMap database: {DB_PATH} ({count} stars)")
     print(f"StarMap running: http://127.0.0.1:{port}/")

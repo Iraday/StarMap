@@ -105,8 +105,11 @@ StarMapAgent.setKeyboardMapping({ forward: "w", backward: "s", left: "a", right:
 StarMapAgent.addAsteroid({ name: "测试小行星", locationStarId: "sol", destinationStarId: "alpha" })
 await StarMapAgent.addStar({ id: "test", name: "Test" }) // 调用后端创建恒星
 await StarMapAgent.updateStar({ id: "test", habitable: 1 }) // 调用后端更新恒星
+await StarMapAgent.editStarInfo("sol", { notes: "_2350 年母星系备注。_" })
 await StarMapAgent.addBody({ id: "test-b", starId: "test", name: "_Test b_", bodyType: "planet", orbitAu: 0.8 })
 await StarMapAgent.updateBody({ id: "test-b", terraformStatus: "terraforming", habitabilityScore: 0.66, rule_info_time: 0.12 })
+await StarMapAgent.editBodyInfo("halley", { orbitalPeriodDays: 27700 })
+await StarMapAgent.editShipInfo(ship.id, { name: "晨线-01A", faction: "无/无所属", notes: "巡航备注" })
 StarMapAgent.getState()
 ```
 
@@ -126,10 +129,12 @@ GET /api/nearest?from=li-hartman&limit=5
 GET /api/zoom-target?star=gj1002
 GET /api/saves
 GET /api/saves?name=story-checkpoint
+GET /api/ship-info?id=ship-1
 GET /api/docs
 POST /api/saves
 POST|PUT|PATCH /api/stars
 POST|PUT|PATCH /api/system-bodies
+POST|PUT|PATCH /api/ship-info
 ```
 
 `POST /api/saves` 会检查 `schemaVersion`。版本不兼容时返回 `409` 和结构化错误，前端会在保存/读取面板中显示失败原因。
@@ -220,13 +225,28 @@ data/stars.sqlite
 .\.venv\Scripts\python.exe scripts\init_db.py --force
 ```
 
-当前数据库种子优先从已生成的 `star_data.js` 读取 50 光年全量恒星系，再叠加 `scripts/seed_data.py` 中的扩展数据和覆盖项；`scripts/init_db.py --force` 会重建 SQLite v5 schema，并重新推导/补足内部天体评分。后续可以直接编辑 SQLite，或通过 `POST|PUT|PATCH /api/stars` 添加/修改恒星系，通过 `POST|PUT|PATCH /api/system-bodies` 添加/修改恒星系内部天体。已有记录支持局部更新，只需要传 `id` 和变化字段；新记录仍需要完整必填字段。
+当前数据库种子优先从已生成的 `star_data.js` 读取 50 光年全量恒星系，再叠加 `scripts/seed_data.py` 中的扩展数据和覆盖项；`scripts/init_db.py --force` 会重建 SQLite v6 schema，并重新推导/补足内部天体评分。后续可以直接编辑 SQLite，或通过 `POST|PUT|PATCH /api/stars` 添加/修改恒星系，通过 `POST|PUT|PATCH /api/system-bodies` 添加/修改恒星系内部天体，通过 `POST|PUT|PATCH /api/ship-info` 保存舰船信息面板的可编辑备注/改名/势力。已有记录支持局部更新，只需要传 `id` 和变化字段；新记录仍需要完整必填字段。
+
+Halley 数据已按 `reference/halley_comet_orbit.json` 的 JPL SBDB 口径校准：半长轴 17.9 AU、近日点 0.575 AU、远日点 35.3 AU、偏心率 0.968、倾角 162°、周期 27700 日。
 
 主要表：
 
 - `stars`：恒星系、非恒星天体、势力归属、筛选字段和系统级 `habitability_score`。
 - `aliases`：名称/简称检索别名。
-- `system_bodies`：双击后显示的恒星、行星、卫星、小行星带和轨道设施节点，包含 `terraform_status` 与单天体 `habitability_score`。
+- `system_bodies`：双击后显示的恒星、行星、卫星、小行星带和轨道设施节点，包含 `terraform_status`、单天体 `habitability_score`、近日点/远日点/偏心率/倾角/周期等轨道字段。
+- `ship_info`：舰船信息面板的可编辑名称、势力和 Markdown 备注；运行态舰船主体仍由保存档和前端舰船系统管理。
+
+## 性能与加载
+
+已识别的主要瓶颈：
+
+- `star_data.js` 约 1.1 MB，浏览器首次加载和解析会占用主线程。
+- 启动脚本和 `server.py` 过去会在已有数据库时仍进入初始化路径，造成不必要的种子解析。
+- 前端会同步创建大量星点标签、分数标签和材质，50 光年全量数据越多越明显。
+
+已做的低垂优化：`Start-StarMap.ps1` 与 `server.py` 现在会先检查 SQLite `user_version`，数据库已是当前 schema 时直接启动；只有缺库、`-RebuildDb` 或 schema 落后时才重建/迁移。
+
+后续可选优化方向：把 `star_data.js` 拆成按时间点/空间块懒加载 JSON；标签纹理改成视野内按需生成并复用；把筛选/距离/势力聚合更多放到 SQLite 查询；若未来数据量达到数万天体，可考虑用 Rust/Go 写本地服务或用 Web Worker 并行解析与筛选。
 
 ## 文件结构
 
