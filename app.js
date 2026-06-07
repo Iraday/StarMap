@@ -864,7 +864,6 @@ function showDetails(star, bodies = null) {
     }
   }
 
-  setDetailNavActive(null);
   if (star.age) rows.push(detailRow("天文", "恒星年龄", formatMarkdown(star.age)));
   if (star.lifespan) rows.push(detailRow("天文", "恒星寿命", formatMarkdown(star.lifespan)));
   if (star.disasters) rows.push(detailRow("天文", "灾害特征", formatMarkdown(star.disasters)));
