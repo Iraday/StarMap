@@ -37,6 +37,8 @@ const skyRadiusLabel = document.querySelector("#skyRadiusLabel");
 const MAP_RADIUS = 50;
 const INNER_RADIUS = 25;
 const CAMERA_HOME = new THREE.Vector3(78, 58, 84);
+const EARTHLIKE_VISUAL_SCORE = 0.8;
+const TERRAFORMING_VISUAL_SCORE = 0.35;
 
 const factionColors = {
   "太阳系": "#f4f2de",
@@ -819,7 +821,7 @@ function updateVisibility() {
     } else {
       star.mesh.material.opacity = mutedByHighlight ? 0.18 : (star.objectType === "diffuse_cloud" ? 0.22 : 1);
       star.mesh.material.transparent = mutedByHighlight || star.objectType === "diffuse_cloud";
-      star.halo.visible = true;
+      star.halo.visible = visible;
       star.halo.material.opacity = highlight ? 0.55 : star.status === "outer" ? 0.16 : 0.28;
       if (star.controlSphere) star.controlSphere.material.opacity = highlight ? 0.075 : 0.04;
       if (star.label) star.label.material.opacity = 1;
@@ -1020,8 +1022,7 @@ function clearSystemView() {
     s.mesh.scale.setScalar(radius * Number(starScale.value));
     s.mesh.material.opacity = s.objectType === "diffuse_cloud" ? 0.22 : 1;
     s.mesh.material.transparent = s.objectType === "diffuse_cloud";
-    if (s.halo) s.halo.visible = true;
-    if (s.controlSphere) s.controlSphere.visible = true;
+    // Don't force-show halo/mesh here — updateVisibility() will set correct visibility
     if (s.label) s.label.material.opacity = 1;
     if (s.scoreLabel) {
       s.scoreLabel.material.opacity = 1;
@@ -1057,6 +1058,8 @@ function exitSystemView() {
     camera.position.copy(CAMERA_HOME);
     controls.target.set(0, 0, 0);
   }
+  // Re-apply all filters so mesh/halo visibility matches current filter state
+  updateVisibility();
   writeAgentOutput({ action: "exitSystem" });
 }
 
@@ -1140,6 +1143,13 @@ function classifyMoon(body) {
   return "rocky_moon";
 }
 
+function bodyVisualClass(body, fallbackClass) {
+  const score = getHabitabilityScore(body);
+  if (score >= EARTHLIKE_VISUAL_SCORE) return "earth_like";
+  if (score >= TERRAFORMING_VISUAL_SCORE) return "terraforming";
+  return fallbackClass;
+}
+
 function bodyColorRich(body) {
   if (body.bodyType === "star") {
     const clean = String(body.summary || "").replace(/[_*~]/g, "");
@@ -1151,10 +1161,12 @@ function bodyColorRich(body) {
   if (body.bodyType === "station") return 0x72d6c9;
   if (body.bodyType === "cloud") return 0x74c0d8;
   if (body.bodyType === "moon") {
-    const mc = classifyMoon(body);
+    const mc = bodyVisualClass(body, classifyMoon(body));
+    if (mc === "earth_like") return 0x4898d0;
+    if (mc === "terraforming") return 0x5f9f6f;
     return { icy_moon: 0xb8d4e8, atmo_moon: 0xd4a862, volcanic_moon: 0xe86040, rocky_moon: 0xc8c0b4 }[mc];
   }
-  const pc = classifyPlanet(body);
+  const pc = bodyVisualClass(body, classifyPlanet(body));
   return {
     gas_giant: 0xd4a050,
     ice_giant: 0x5888c8,
@@ -1185,7 +1197,7 @@ function bodyRadiusRich(body) {
   if (body.bodyType === "moon") {
     const base = 0.09;
     if (re !== null) return base + Math.min(re / 2, 1) * 0.06;
-    return 0.11;
+    return getHabitabilityScore(body) >= TERRAFORMING_VISUAL_SCORE ? 0.135 : 0.11;
   }
   const pc = classifyPlanet(body);
   const mins = { gas_giant: 0.26, ice_giant: 0.22, mini_neptune: 0.19, lava: 0.13, venus: 0.16, mars: 0.14, mercury: 0.12, earth_like: 0.17, terraforming: 0.16, ice: 0.14, rocky: 0.14 };
@@ -1238,10 +1250,10 @@ function hasCuratedSystemDetails(star, bodies = []) {
   });
 }
 
-function normalizeScore(value, clampSingle = true) {
+function normalizeScore(value) {
   const score = Number(value);
   if (!Number.isFinite(score)) return 0;
-  return clampSingle ? Math.max(0, Math.min(1, score)) : Math.max(0, score);
+  return Math.max(0, score);
 }
 
 function explicitHabitabilityScore(item) {
@@ -1275,24 +1287,14 @@ function isNonTerrestrialPlanet(body) {
 function getHabitabilityScore(body) {
   const explicit = explicitHabitabilityScore(body);
   if (explicit !== null) return explicit;
-  if (!body || !["planet", "moon"].includes(body.bodyType) || isNonTerrestrialPlanet(body)) return 0;
-  if (body.id === "earth" || body.name === "地球") return 1.0;
-  const status = body.terraformStatus ?? body.terraform_status ?? "";
-  if (status === "natural_habitable") return 0.92;
-  if (status === "terraformed") return 0.86;
-  if (status === "terraforming") return 0.64;
-  if (status === "terraformable") return 0.42;
-  const pc = body.bodyType === "moon" ? classifyMoon(body) : classifyPlanet(body);
-  if (pc === "earth_like") return 0.72;
-  if (pc === "terraforming") return 0.64;
-  return body.habitable ? 0.42 : 0;
+  return 0;
 }
 
 function getSystemHabitabilityScore(star, bodies = null) {
   if (bodies) {
     return bodies.reduce((sum, body) => sum + getHabitabilityScore(body), 0);
   }
-  return normalizeScore(star?.habitabilityScore ?? star?.habitability_score ?? 0, false);
+  return normalizeScore(star?.habitabilityScore ?? star?.habitability_score ?? 0);
 }
 
 function terraformStatusLabel(status) {
@@ -1322,11 +1324,25 @@ function makeScoreLabel(score, status = "", total = false, fontSize = 16) {
   return label;
 }
 
-function createBodyTexture(type, hexColor) {
+function seededRandom(seedText) {
+  let state = 2166136261;
+  const text = String(seedText || "starmap");
+  for (let i = 0; i < text.length; i += 1) {
+    state ^= text.charCodeAt(i);
+    state = Math.imul(state, 16777619);
+  }
+  return () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return state / 4294967296;
+  };
+}
+
+function createBodyTexture(type, hexColor, seedKey = "") {
   const canvas = document.createElement("canvas");
   canvas.width = 256;
   canvas.height = 256;
   const ctx = canvas.getContext("2d");
+  const rand = seededRandom(`${type}:${hexColor}:${seedKey}`);
   
   const baseColor = new THREE.Color(hexColor);
   
@@ -1342,14 +1358,14 @@ function createBodyTexture(type, hexColor) {
   // Add noise/stripes
   ctx.globalAlpha = 0.4;
   for (let i = 0; i < 8000; i++) {
-    const x = Math.random() * 256;
-    const y = Math.random() * 256;
-    const size = Math.random() * 2 + 1;
+    const x = rand() * 256;
+    const y = rand() * 256;
+    const size = rand() * 2 + 1;
     if (type === "gas_giant" || type === "mini_neptune") {
-      ctx.fillStyle = Math.random() > 0.5 ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.2)";
+      ctx.fillStyle = rand() > 0.5 ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.2)";
       ctx.fillRect(0, y, 256, size * 2);
     } else {
-      ctx.fillStyle = Math.random() > 0.5 ? "#ffffff" : "#000000";
+      ctx.fillStyle = rand() > 0.5 ? "#ffffff" : "#000000";
       ctx.fillRect(x, y, size, size);
     }
   }
@@ -1360,21 +1376,21 @@ function createBodyTexture(type, hexColor) {
     ctx.fillStyle = "#228b22"; // green patches
     for (let i = 0; i < 20; i++) {
       ctx.beginPath();
-      ctx.arc(Math.random() * 256, Math.random() * 256, Math.random() * 30 + 10, 0, Math.PI * 2);
+      ctx.arc(rand() * 256, rand() * 256, rand() * 30 + 10, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.globalAlpha = type === "terraforming" ? 0.4 : 0.8;
     ctx.fillStyle = "#ffffff"; // clouds
     for (let i = 0; i < 40; i++) {
       ctx.beginPath();
-      ctx.ellipse(Math.random() * 256, Math.random() * 256, Math.random() * 20 + 5, Math.random() * 8 + 2, Math.random() * Math.PI, 0, Math.PI * 2);
+      ctx.ellipse(rand() * 256, rand() * 256, rand() * 20 + 5, rand() * 8 + 2, rand() * Math.PI, 0, Math.PI * 2);
       ctx.fill();
     }
   } else if (type === "lava") {
     ctx.globalAlpha = 0.8;
     ctx.fillStyle = "#ffaa00"; // cracks
     for (let i = 0; i < 15; i++) {
-      ctx.fillRect(Math.random() * 256, Math.random() * 256, Math.random() * 40, 2);
+      ctx.fillRect(rand() * 256, rand() * 256, rand() * 40, 2);
     }
   }
 
@@ -1500,8 +1516,9 @@ async function openSystemView(value = selectedStar?.id) {
     const angle = index * 1.78 + (star.id.length % 7);
     const color = bodyColorRich(body);
     const radius = bodyRadiusRich(body);
-    const pc = body.bodyType === "planet" ? classifyPlanet(body) : (body.bodyType === "moon" ? classifyMoon(body) : body.bodyType);
-    const texture = createBodyTexture(pc, color);
+    const baseClass = body.bodyType === "planet" ? classifyPlanet(body) : (body.bodyType === "moon" ? classifyMoon(body) : body.bodyType);
+    const pc = bodyVisualClass(body, baseClass);
+    const texture = createBodyTexture(pc, color, body.id || body.name);
 
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(radius, 32, 24),
@@ -1579,8 +1596,8 @@ async function openSystemView(value = selectedStar?.id) {
       const orbit = makeOrbit(moonOrbitRadius, 0xd5dce8);
       orbit.position.copy(parentMesh.position);
       scaleRoot.add(orbit);
-      const mc = classifyMoon(moon);
-      const moonTex = createBodyTexture(mc, moonColor);
+      const mc = bodyVisualClass(moon, classifyMoon(moon));
+      const moonTex = createBodyTexture(mc, moonColor, moon.id || moon.name);
       const mesh = new THREE.Mesh(
         new THREE.SphereGeometry(radius, 24, 16),
         new THREE.MeshBasicMaterial({ color: 0xffffff, map: moonTex })
@@ -1615,8 +1632,8 @@ async function openSystemView(value = selectedStar?.id) {
         scaleRoot.add(orbit);
       }
       const angle = globalIdx * 1.78 + (star.id.length % 7);
-      const mc = classifyMoon(moon);
-      const moonTex = createBodyTexture(mc, moonColor);
+      const mc = bodyVisualClass(moon, classifyMoon(moon));
+      const moonTex = createBodyTexture(mc, moonColor, moon.id || moon.name);
       const mesh = new THREE.Mesh(
         new THREE.SphereGeometry(radius, 24, 16),
         new THREE.MeshBasicMaterial({ color: 0xffffff, map: moonTex })
@@ -1651,21 +1668,22 @@ async function openSystemView(value = selectedStar?.id) {
     if (s.id === star.id) return;
     const dist = localDistance(star, s);
     const inSky = skyR > 0 && dist <= skyR;
-    s.mesh.visible = inSky && s.mesh.visible;
+    const backgroundVisible = inSky && s.mesh.visible;
+    s.mesh.visible = backgroundVisible;
     s.mesh.scale.setScalar(0.06);
     s.mesh.material.opacity = 0.5;
     s.mesh.material.transparent = true;
     if (s.halo) {
-      s.halo.visible = inSky;
+      s.halo.visible = backgroundVisible;
       s.halo.material.opacity = 0.05;
     }
     if (s.controlSphere) s.controlSphere.visible = false;
     if (s.label) {
-      s.label.visible = inSky && showLabels.checked;
+      s.label.visible = backgroundVisible && showLabels.checked;
       s.label.material.opacity = 0.4;
     }
     if (s.scoreLabel) {
-      s.scoreLabel.visible = inSky && scoreLabelsVisible();
+      s.scoreLabel.visible = backgroundVisible && scoreLabelsVisible();
       s.scoreLabel.material.opacity = 0.45;
     }
   });
