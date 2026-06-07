@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+"""
+Generate star_data.js from the current SQLite database.
+This exports ALL stars and their system bodies as JS fallback data,
+so the map works on any port without the Python server.
+"""
+from __future__ import annotations
+
+import json
+import re
+import sqlite3
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+DB_PATH = ROOT / "data" / "stars.sqlite"
+OUT_PATH = ROOT / "star_data.js"
+
+
+def val(v, default=""):
+    """Return v if not None, else default."""
+    if v is None:
+        return default
+    return v
+
+
+def js_value(v):
+    """Convert a Python value to a compact JS literal."""
+    if v is None:
+        return "null"
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (int, float)):
+        return repr(v)
+    # string
+    s = str(v)
+    escaped = s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\r", "")
+    return f'"{escaped}"'
+
+
+def star_row_to_js(row: dict) -> str:
+    """Render one star as a compact JS object literal (no trailing comma)."""
+    xyz = [row["x"], row["y"], row["z"]]
+    fields = [
+        ("id", row["id"]),
+        ("name", val(row["name"])),
+        ("short", val(row["short"])),
+        ("octant", val(row["octant"])),
+        ("order", val(row["octant_order"], 0)),
+        ("distance", row["distance"]),
+        ("arrival", row["arrival"]),
+        ("xyz", xyz),
+        ("faction", val(row["faction"])),
+        ("rank", val(row["rank"], "-")),
+        ("className", val(row["class_name"])),
+        ("planets", val(row["planets"])),
+        ("reality", val(row["reality"])),
+        ("setting", val(row["setting"])),
+        ("habitable", val(row["habitable"], 0)),
+        ("status", val(row["status"], "outer")),
+        ("objectType", val(row["object_type"], "star_system")),
+        ("spectralClass", val(row["spectral_class"])),
+        ("starCount", val(row["star_count"], 1)),
+        ("planetCount", val(row["planet_count"], 0)),
+        ("confirmedPlanets", val(row["confirmed_planets"], 0)),
+        ("candidatePlanets", val(row["candidate_planets"], 0)),
+        ("factionType", val(row["faction_type"])),
+        ("displayAfter", val(row["display_after"], 0)),
+        ("displayUntil", row["display_until"]),
+        ("controlStart", val(row["control_start"], 2350)),
+        ("controlEnd", row["control_end"]),
+        ("notes", val(row["notes"])),
+        ("age", val(row["age"])),
+        ("lifespan", val(row["lifespan"])),
+        ("disasters", val(row["disasters"])),
+        ("hz_inner", val(row["hz_inner"], 0)),
+        ("hz_outer", val(row["hz_outer"], 0)),
+        ("rule_info_time", val(row["rule_info_time"], 0)),
+        ("info_speed", val(row["info_speed"], 1)),
+        ("ftl_speed", val(row["ftl_speed"], 1)),
+    ]
+
+    parts = []
+    for key, value in fields:
+        if key == "xyz":
+            coord = f"[{value[0]}, {value[1]}, {value[2]}]"
+            parts.append(f"    {key}: {coord}")
+        else:
+            parts.append(f"    {key}: {js_value(value)}")
+
+    return "  {\n" + ",\n".join(parts) + "\n  }"
+
+
+def body_row_to_js(row: dict) -> str:
+    fields = [
+        ("id", val(row["id"])),
+        ("starId", val(row["star_id"])),
+        ("parentId", row["parent_id"]),
+        ("name", val(row["name"])),
+        ("bodyType", val(row["body_type"])),
+        ("orbitAu", val(row["orbit_au"], 0)),
+        ("radiusLabel", val(row["radius_label"])),
+        ("massLabel", val(row["mass_label"])),
+        ("habitable", val(row["habitable"], 0)),
+        ("summary", val(row["summary"])),
+        ("sortOrder", val(row["sort_order"], 0)),
+        ("rule_info_time", val(row["rule_info_time"], 0)),
+        ("info_speed", val(row["info_speed"], 1)),
+        ("ftl_speed", val(row["ftl_speed"], 1)),
+    ]
+    parts = [f"      {k}: {js_value(v)}" for k, v in fields]
+    return "    {\n" + ",\n".join(parts) + "\n    }"
+
+
+def generate():
+    con = sqlite3.connect(DB_PATH)
+    con.row_factory = sqlite3.Row
+
+    stars = con.execute("SELECT * FROM stars ORDER BY distance, id").fetchall()
+    bodies = con.execute(
+        "SELECT * FROM system_bodies ORDER BY star_id, sort_order"
+    ).fetchall()
+
+    # Group bodies by star_id
+    bodies_by_star: dict[str, list] = {}
+    for b in bodies:
+        sid = b["star_id"]
+        bodies_by_star.setdefault(sid, []).append(b)
+
+    # Build star JS array
+    star_parts = [star_row_to_js(dict(s)) for s in stars]
+    stars_js = "export const fallbackStars = [\n" + ",\n".join(star_parts) + "\n];\n"
+
+    # Build bodies JS object keyed by star_id
+    body_obj_parts = []
+    for sid, blist in sorted(bodies_by_star.items()):
+        body_parts = [body_row_to_js(dict(b)) for b in blist]
+        inner = ",\n".join(body_parts)
+        escaped_sid = sid.replace('"', '\\"')
+        body_obj_parts.append(f'  "{escaped_sid}": [\n{inner}\n  ]')
+
+    bodies_js = "export const fallbackBodies = {\n" + ",\n".join(body_obj_parts) + "\n};\n"
+
+    content = f"// Auto-generated by scripts/generate_star_data.py — do not edit manually.\n// Stars: {len(stars)}  Bodies: {len(bodies)}\n\n{stars_js}\n{bodies_js}"
+    OUT_PATH.write_text(content, encoding="utf-8")
+    print(f"Written {OUT_PATH.name}: {len(stars)} stars, {len(bodies)} bodies ({OUT_PATH.stat().st_size // 1024} KB)")
+    con.close()
+
+
+if __name__ == "__main__":
+    generate()
