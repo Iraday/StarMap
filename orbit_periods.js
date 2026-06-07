@@ -165,20 +165,53 @@ export const orbitPeriodByName = {
 
 // Sol system real orbital periods (days)
 export const solPeriods = {
+  // Planets
   "mercury": 87.969,
   "venus": 224.701,
   "earth": 365.256,
   "mars": 686.971,
+  "ceres": 1681.63,
   "jupiter": 4332.59,
   "saturn": 10759.22,
   "uranus": 30688.5,
   "neptune": 60182.0,
+  "pluto": 90560.0,
+  "eris": 203830.0,
+  "haumea": 103774.0,
+  "makemake": 112897.0,
+  "sedna": 4404480.0,
+  // Earth moons
   "moon": 27.322,
+  // Mars moons
+  "phobos": 0.3189,
+  "deimos": 1.2624,
+  // Jupiter moons
   "io": 1.769,
   "europa": 3.551,
   "ganymede": 7.155,
   "callisto": 16.689,
+  "amalthea": 0.498,
+  // Saturn moons
   "titan": 15.945,
+  "enceladus": 1.370,
+  "mimas": 0.942,
+  "rhea": 4.518,
+  "dione": 2.737,
+  "tethys": 1.888,
+  "iapetus": 79.322,
+  // Uranus moons
+  "miranda": 1.413,
+  "ariel": 2.520,
+  "umbriel": 4.144,
+  "titania": 8.706,
+  "oberon": 13.463,
+  // Neptune moons
+  "triton": 5.877,
+  "nereid": 360.14,
+  // Comets (approximate)
+  "halley": 27510.0,
+  "encke": 1204.0,
+  "hale-bopp": 912500.0,
 };
 
 export const orbitPeriodBySma = {

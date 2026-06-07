@@ -1,7 +1,8 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { fallbackStars, fallbackBodies } from "./star_data.js";
+import { fallbackStars, fallbackBodies } from "./star_data.js?v=2";
 import { orbitPeriodByName, solPeriods, orbitPeriodBySma } from "./orbit_periods.js";
+import { shipClasses, ships, createShip, commandTravel, tickShips, shipWorldPosition, shipInfo, listShips, removeShip, lorentz, travelTimes } from "./ships.js";
 
 const canvas = document.querySelector("#map");
 const detailTitle = document.querySelector("#detailTitle");
@@ -121,6 +122,12 @@ let renderingFieldControls = false;
 let systemViewStar = null;
 let orbitSimDays = 0;               // cumulative simulation time in days
 const orbitingBodies = [];           // [{mesh, label, scoreLabel, glowInner, glowOuter, saturnRing, controlSphere, orbitCenter, orbitRadius, periodDays, startAngle, parentMesh}]
+// ── Time control ──
+let timeFlowDaysPerSec = 1;          // global time flow rate (days per real second)
+let totalSimDays = 0;                // total elapsed simulation days
+let timeFlowPaused = false;
+let followShipId = null;              // ship id to track with camera
+const shipMeshes = new Map();         // shipId -> {mesh, label, trail}
 const factionCycleIndex = new Map();
 const detailGroupVisibility = new Map(
   JSON.parse(localStorage.getItem("starmap-detail-groups") || "[]")
@@ -1042,6 +1049,7 @@ function clearSystemView() {
   activeSystemScaleRoot = null;
   inSystemView = false;
   controls.minDistance = 0.5;
+  document.querySelectorAll(".system-view-only").forEach((el) => { el.style.display = "none"; });
   starLayer.visible = true;
   labelLayer.visible = showLabels.checked || scoreLabelsVisible();
   territoryLayer.visible = showTerritories.checked;
@@ -1165,6 +1173,7 @@ function bodyColorRich(body) {
   }
   if (body.bodyType === "brown_dwarf") return 0x8b3a3a;
   if (body.bodyType === "belt") return 0xa8a090;
+  if (body.bodyType === "comet") return 0xd0e8ff;
   if (body.bodyType === "station") return 0x72d6c9;
   if (body.bodyType === "cloud") return 0x74c0d8;
   if (body.bodyType === "moon") {
@@ -1191,6 +1200,7 @@ function bodyColorRich(body) {
 
 function bodyRadiusRich(body) {
   if (body.bodyType === "belt") return 0.08;
+  if (body.bodyType === "comet") return 0.07;
   if (body.bodyType === "station") return 0.14;
   if (body.bodyType === "cloud") return 0.22;
   if (body.bodyType === "brown_dwarf") return 0.36;
@@ -1224,6 +1234,7 @@ function bodyColor(bodyType) {
     planet: 0x7bd7ff,
     moon: 0xd5dce8,
     belt: 0xa8a090,
+    comet: 0xd0e8ff,
     station: 0x72d6c9,
     cloud: 0x74c0d8
   }[bodyType] ?? 0xcbd5e1;
@@ -1464,26 +1475,29 @@ async function openSystemView(value = selectedStar?.id) {
   try {
     payload = await apiJson(`/api/system?id=${encodeURIComponent(star.id)}`);
   } catch {
-    const curatedBodies = fallbackBodies[star.id];
-    if (curatedBodies) {
-      payload = { star, bodies: curatedBodies };
-    } else {
-      payload = {
-        star,
-        bodies: [
-          {
-            id: `${star.id}-primary`,
-            name: star.short,
-            bodyType: star.objectType === "diffuse_cloud" ? "cloud" : "star",
-            orbitAu: 0,
-            radiusLabel: star.className,
-            habitable: 0,
-            summary: star.setting,
-            sortOrder: 0
-          }
-        ]
-      };
-    }
+    payload = null;
+  }
+  // Use fallback if it has more bodies (e.g. newly added moons/comets)
+  const curatedBodies = fallbackBodies[star.id];
+  if (curatedBodies && (!payload || curatedBodies.length > (payload.bodies?.length || 0))) {
+    payload = { star, bodies: curatedBodies };
+  }
+  if (!payload) {
+    payload = {
+      star,
+      bodies: [
+        {
+          id: `${star.id}-primary`,
+          name: star.short,
+          bodyType: star.objectType === "diffuse_cloud" ? "cloud" : "star",
+          orbitAu: 0,
+          radiusLabel: star.className,
+          habitable: 0,
+          summary: star.setting,
+          sortOrder: 0
+        }
+      ]
+    };
   }
   // Save camera state before entering system view
   savedCameraPos = camera.position.clone();
@@ -1503,6 +1517,7 @@ async function openSystemView(value = selectedStar?.id) {
   activeSystemScaleRoot = scaleRoot;
   inSystemView = true;
   systemViewStar = star;
+  document.querySelectorAll(".system-view-only").forEach((el) => { el.style.display = ""; });
 
   star.mesh.visible = false;
   if (star.halo) star.halo.visible = false;
@@ -2091,6 +2106,72 @@ function exposeAgentApi() {
       clearSystemView();
       writeAgentOutput({ action: "clearSystem" });
     },
+    // ── Time control API ──
+    setTimeFlow: (rate) => {
+      const result = setTimeFlow(rate);
+      writeAgentOutput({ action: "setTimeFlow", ...result });
+      return result;
+    },
+    pauseTime: () => setTimeFlow(0),
+    resumeTime: (rate) => setTimeFlow(rate || 1),
+    resetTime: () => { resetSimTime(); writeAgentOutput({ action: "resetTime" }); },
+    getElapsed: () => ({
+      totalDays: totalSimDays,
+      display: formatElapsedTime(totalSimDays),
+      flowRate: timeFlowDaysPerSec,
+      flowDisplay: formatTimeFlow(timeFlowDaysPerSec)
+    }),
+    // ── Ship API ──
+    buildShip: (opts) => {
+      const ship = createShip({ ...opts, instant: false });
+      ship.buildStartDay = totalSimDays;
+      writeAgentOutput({ action: "buildShip", ship: shipInfo(ship) });
+      return ship;
+    },
+    deployShip: (opts) => {
+      const ship = createShip({ ...opts, instant: true });
+      ship.buildStartDay = totalSimDays;
+      writeAgentOutput({ action: "deployShip", ship: shipInfo(ship) });
+      return ship;
+    },
+    moveShip: (shipId, destStarId, opts) => {
+      const distFn = (from, to) => {
+        const a = starById.get(from);
+        const b = starById.get(to);
+        if (!a || !b) return 0;
+        return localDistance(a, b);
+      };
+      const ship = commandTravel(shipId, destStarId, distFn, totalSimDays, opts);
+      writeAgentOutput({ action: "moveShip", ship: shipInfo(ship) });
+      return ship;
+    },
+    shipInfo: (shipId) => {
+      const ship = ships.find((s) => s.id === shipId);
+      if (!ship) throw new Error(`Ship not found: ${shipId}`);
+      const info = showShipInfo(ship);
+      return info;
+    },
+    listShips: (filter) => {
+      const result = listShips(filter);
+      writeAgentOutput(result.map((s) => shipInfo(s)));
+      return result;
+    },
+    removeShip: (shipId) => {
+      removeShip(shipId);
+      writeAgentOutput({ action: "removeShip", shipId });
+    },
+    shipClasses: () => {
+      writeAgentOutput(Object.entries(shipClasses).map(([k, v]) => ({ id: k, ...v })));
+      return shipClasses;
+    },
+    followShip: (shipId) => {
+      followShipId = shipId || null;
+      writeAgentOutput({ action: "followShip", shipId: followShipId });
+    },
+    unfollowShip: () => {
+      followShipId = null;
+      writeAgentOutput({ action: "unfollowShip" });
+    },
     getState: () => ({
       selected: selectedStar,
       selectedBody,
@@ -2099,7 +2180,10 @@ function exposeAgentApi() {
       starCount: stars.length,
       visibleStarCount: stars.filter((star) => star.mesh?.visible).length,
       camera: camera.position.toArray(),
-      target: controls.target.toArray()
+      target: controls.target.toArray(),
+      totalSimDays,
+      timeFlowDaysPerSec,
+      shipCount: ships.length
     })
   };
   window.StarMapAgent = api;
@@ -2144,9 +2228,46 @@ function bindUi() {
   if (orbitSpeed) {
     orbitSpeed.addEventListener("input", () => {
       const dps = getOrbitSpeedDaysPerSec();
-      if (orbitSpeedLabel) orbitSpeedLabel.textContent = formatOrbitSpeed(dps);
+      timeFlowDaysPerSec = dps;
+      timeFlowPaused = dps <= 0;
+      if (orbitSpeedLabel) orbitSpeedLabel.textContent = formatTimeFlow(dps);
+      updateTimeHud();
     });
   }
+  // Time HUD controls
+  const timeHudToggle = document.querySelector("#timeHudToggle");
+  const timeHud = document.querySelector("#timeHud");
+  if (timeHudToggle && timeHud) {
+    timeHudToggle.addEventListener("click", () => {
+      timeHud.classList.toggle("collapsed");
+    });
+  }
+  const timePauseBtn = document.querySelector("#timePauseBtn");
+  if (timePauseBtn) {
+    timePauseBtn.addEventListener("click", () => {
+      if (timeFlowPaused) { setTimeFlow(1); timePauseBtn.textContent = "⏸"; }
+      else { setTimeFlow(0); timePauseBtn.textContent = "▶"; }
+    });
+  }
+  const timeResetBtn = document.querySelector("#timeResetBtn");
+  if (timeResetBtn) {
+    timeResetBtn.addEventListener("click", resetSimTime);
+  }
+  // Time speed preset buttons
+  document.querySelectorAll("[data-time-rate]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      setTimeFlow(btn.dataset.timeRate);
+    });
+  });
+  // Show/hide system-view-only controls
+  const systemOnlyControls = document.querySelectorAll(".system-view-only");
+  const observer = new MutationObserver(() => {
+    systemOnlyControls.forEach((el) => {
+      el.style.display = inSystemView ? "" : "none";
+    });
+  });
+  // Initial hide
+  systemOnlyControls.forEach((el) => { el.style.display = "none"; });
   detailSelectAll?.addEventListener("click", () => setAllDetailGroups(true));
   detailSelectNone?.addEventListener("click", () => setAllDetailGroups(false));
 
@@ -2238,23 +2359,93 @@ function resize() {
   camera.updateProjectionMatrix();
 }
 
+// ── Time control system ─────────────────────────────────────────────
+
 function getOrbitSpeedDaysPerSec() {
-  if (!orbitSpeed) return 0;
+  if (!orbitSpeed) return timeFlowDaysPerSec;
   const v = Number(orbitSpeed.value);
-  // Slider 0..10: 0=paused, 1=1d/s, 5=30d/s, 8=365d/s, 10=3650d/s
-  // Exponential curve: 0 → pause, then 10^(v*0.356 - 0.356) ≈ 1..3650
   if (v <= 0) return 0;
   return Math.pow(10, v * 0.356 - 0.356);
 }
 
-const orbitSpeedPresets = [0, 1, 3, 7, 15, 30, 90, 180, 365, 1000, 3650];
-
-function formatOrbitSpeed(daysPerSec) {
-  if (daysPerSec <= 0) return "暂停";
+function formatTimeFlow(daysPerSec) {
+  if (daysPerSec <= 0) return "⏸ 暂停";
+  if (daysPerSec < 1 / 24) return `${(daysPerSec * 24 * 60).toFixed(1)} 分/秒`;
+  if (daysPerSec < 1) return `${(daysPerSec * 24).toFixed(1)} 时/秒`;
   if (daysPerSec < 1.5) return `${daysPerSec.toFixed(1)} 天/秒`;
   if (daysPerSec < 365) return `${Math.round(daysPerSec)} 天/秒`;
   const yps = daysPerSec / 365.25;
-  return `${yps.toFixed(1)} 年/秒`;
+  if (yps < 100) return `${yps.toFixed(1)} 年/秒`;
+  return `${Math.round(yps)} 年/秒`;
+}
+
+function formatElapsedTime(days) {
+  if (days <= 0) return "0天";
+  const years = Math.floor(days / 365.25);
+  const rem = days - years * 365.25;
+  const months = Math.floor(rem / 30.44);
+  const d = Math.floor(rem - months * 30.44);
+  const parts = [];
+  if (years > 0) parts.push(`${years}年`);
+  if (months > 0) parts.push(`${months}月`);
+  if (d > 0 || parts.length === 0) parts.push(`${d}天`);
+  return parts.join("");
+}
+
+/**
+ * Set time flow rate. Agent-callable.
+ * Accepts flexible formats: "1 day/sec", "6 hours/sec", "1 month/sec", "10 years/sec", 30 (raw days/sec), etc.
+ */
+function setTimeFlow(rateSpec) {
+  if (typeof rateSpec === "number") {
+    timeFlowDaysPerSec = Math.max(0, rateSpec);
+  } else {
+    const s = String(rateSpec).toLowerCase().trim();
+    if (s === "pause" || s === "暂停" || s === "0") { timeFlowDaysPerSec = 0; }
+    else {
+      const m = s.match(/([\d.]+)\s*(min|minute|分钟?|hour|小时|h|day|天|d|week|周|month|月|year|年|y|sec|秒|s)?/i);
+      if (m) {
+        const val = parseFloat(m[1]);
+        const unit = (m[2] || "day").toLowerCase();
+        if (unit.startsWith("min") || unit.startsWith("分")) timeFlowDaysPerSec = val / 1440;
+        else if (unit.startsWith("h") || unit.startsWith("hour") || unit.startsWith("小时")) timeFlowDaysPerSec = val / 24;
+        else if (unit.startsWith("d") || unit.startsWith("day") || unit.startsWith("天")) timeFlowDaysPerSec = val;
+        else if (unit.startsWith("w") || unit.startsWith("week") || unit.startsWith("周")) timeFlowDaysPerSec = val * 7;
+        else if (unit.startsWith("mon") || unit.startsWith("月")) timeFlowDaysPerSec = val * 30.44;
+        else if (unit.startsWith("y") || unit.startsWith("year") || unit.startsWith("年")) timeFlowDaysPerSec = val * 365.25;
+        else if (unit.startsWith("sec") || unit.startsWith("秒") || unit === "s") timeFlowDaysPerSec = val / 86400;
+        else timeFlowDaysPerSec = val;
+      }
+    }
+  }
+  timeFlowPaused = timeFlowDaysPerSec <= 0;
+  updateTimeHud();
+  // Sync orbit slider if present
+  if (orbitSpeed && timeFlowDaysPerSec > 0) {
+    const sliderVal = (Math.log10(timeFlowDaysPerSec) + 0.356) / 0.356;
+    orbitSpeed.value = Math.max(0, Math.min(10, sliderVal));
+    if (orbitSpeedLabel) orbitSpeedLabel.textContent = formatTimeFlow(timeFlowDaysPerSec);
+  }
+  return { timeFlowDaysPerSec, display: formatTimeFlow(timeFlowDaysPerSec) };
+}
+
+function resetSimTime() {
+  totalSimDays = 0;
+  orbitSimDays = 0;
+  updateTimeHud();
+}
+
+function updateTimeHud() {
+  const hudEl = document.querySelector("#timeHud");
+  if (!hudEl) return;
+  const elapsed = document.querySelector("#timeElapsed");
+  const rate = document.querySelector("#timeRate");
+  if (elapsed) elapsed.textContent = formatElapsedTime(totalSimDays);
+  if (rate) rate.textContent = formatTimeFlow(timeFlowDaysPerSec);
+}
+
+function formatOrbitSpeed(daysPerSec) {
+  return formatTimeFlow(daysPerSec);
 }
 
 function updateOrbitPositions() {
@@ -2290,9 +2481,112 @@ function updateOrbitPositions() {
     ob.mesh.position.set(x, parentPos.y, z);
     if (ob.label) ob.label.position.set(x, parentPos.y + ob.labelOffsetY, z);
     if (ob.scoreLabel) ob.scoreLabel.position.set(x, parentPos.y + ob.scoreLabelOffsetY, z);
-    // Move the moon's orbit ring to follow parent
     if (ob.orbitRing) ob.orbitRing.position.copy(parentPos);
   }
+}
+
+// ── Ship 3D rendering ───────────────────────────────────────────────
+
+function getStarWorldPos(starId) {
+  const s = starById.get(starId);
+  if (!s) return null;
+  return toWorld(s.xyz);
+}
+
+function updateShipMeshes() {
+  for (const ship of ships) {
+    let entry = shipMeshes.get(ship.id);
+    // Create mesh if needed
+    if (!entry) {
+      const cls = ship.classInfo;
+      const color = ship.state === "building" ? 0x555555 : 0x40e0d0;
+      const geo = new THREE.SphereGeometry(0.18, 12, 8);
+      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9 });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.userData.ship = ship;
+      const label = makeTextSprite(`${cls.icon} ${ship.name}`, "#40e0d0", 18);
+      label.position.set(0, 0.35, 0);
+      starLayer.add(mesh);
+      labelLayer.add(label);
+      entry = { mesh, label, trail: null, lastPositions: [] };
+      shipMeshes.set(ship.id, entry);
+    }
+    // Update position
+    if (ship.state === "traveling") {
+      const pos = shipWorldPosition(ship, getStarWorldPos);
+      if (pos) {
+        entry.mesh.position.set(pos.x, pos.y, pos.z);
+        entry.label.position.set(pos.x, pos.y + 0.35, pos.z);
+        entry.mesh.visible = true;
+        entry.label.visible = true;
+        entry.mesh.material.color.setHex(0x40e0d0);
+        // Update trail
+        entry.lastPositions.push(new THREE.Vector3(pos.x, pos.y, pos.z));
+        if (entry.lastPositions.length > 80) entry.lastPositions.shift();
+        if (entry.trail) { starLayer.remove(entry.trail); entry.trail.geometry.dispose(); }
+        if (entry.lastPositions.length > 2) {
+          const tGeo = new THREE.BufferGeometry().setFromPoints(entry.lastPositions);
+          entry.trail = new THREE.Line(tGeo, new THREE.LineBasicMaterial({ color: 0x40e0d0, transparent: true, opacity: 0.3 }));
+          starLayer.add(entry.trail);
+        }
+      }
+    } else if (ship.state === "building") {
+      const pos = getStarWorldPos(ship.locationStarId);
+      if (pos) {
+        const offset = (ships.indexOf(ship) % 5) * 0.5 + 0.6;
+        entry.mesh.position.set(pos.x + offset, pos.y + 0.3, pos.z);
+        entry.label.position.set(pos.x + offset, pos.y + 0.65, pos.z);
+      }
+      entry.mesh.material.color.setHex(0x555555);
+      entry.mesh.material.opacity = 0.4 + ship.buildProgressFrac * 0.5;
+      entry.mesh.visible = true;
+      entry.label.visible = true;
+    } else {
+      // idle — parked at location
+      const pos = getStarWorldPos(ship.locationStarId);
+      if (pos) {
+        const offset = (ships.indexOf(ship) % 5) * 0.5 + 0.6;
+        entry.mesh.position.set(pos.x + offset, pos.y + 0.3, pos.z);
+        entry.label.position.set(pos.x + offset, pos.y + 0.65, pos.z);
+      }
+      entry.mesh.material.color.setHex(0x20b2aa);
+      entry.mesh.material.opacity = 0.9;
+      entry.mesh.visible = true;
+      entry.label.visible = true;
+    }
+  }
+  // Remove meshes for deleted ships
+  for (const [id, entry] of shipMeshes) {
+    if (!ships.find((s) => s.id === id)) {
+      starLayer.remove(entry.mesh);
+      labelLayer.remove(entry.label);
+      if (entry.trail) { starLayer.remove(entry.trail); entry.trail.geometry.dispose(); }
+      entry.mesh.geometry.dispose();
+      entry.mesh.material.dispose();
+      shipMeshes.delete(id);
+    }
+  }
+}
+
+function showShipInfo(ship) {
+  const info = shipInfo(ship);
+  const cls = ship.classInfo;
+  const rows = [];
+  rows.push(`${cls.icon} <b>${ship.name}</b>  [${cls.label}]`);
+  rows.push(`状态: ${ship.state === "building" ? "建造中" : ship.state === "traveling" ? "航行中" : "停泊"}`);
+  rows.push(`位置: ${ship.locationStarId}${ship.destinationStarId ? " → " + ship.destinationStarId : ""}`);
+  if (ship.state === "building") {
+    rows.push(`建造进度: ${info.buildProgress}  剩余: ${formatElapsedTime(info.buildEtaDays)}`);
+  }
+  if (ship.state === "traveling") {
+    rows.push(`航行进度: ${info.travelProgress}  距离: ${info.distanceLy.toFixed(2)} ly`);
+    rows.push(`航速: ${ship.travelSpeed}c  ETA: ${formatElapsedTime(info.travelEtaDays)}`);
+    rows.push(`时间膨胀: ${info.timeDilation}  船员经历: ${formatElapsedTime(info.crewElapsedDays)}`);
+    rows.push(`船员累计固有时: ${formatElapsedTime(info.crewTotalDays)}`);
+  }
+  rows.push(`乘员: ${cls.crew}  FTL: ${cls.ftl ? "是" : "否"}  最大速度: ${cls.maxSpeed}c`);
+  writeAgentOutput(rows.join("\n"));
+  return info;
 }
 
 function animate() {
@@ -2302,6 +2596,29 @@ function animate() {
   lastFrameTime = now;
   updateFlyControls(delta);
   controls.update();
+
+  // Global time advancement
+  if (!timeFlowPaused && timeFlowDaysPerSec > 0) {
+    const deltaDays = delta * timeFlowDaysPerSec;
+    totalSimDays += deltaDays;
+
+    // Orbit animation in system view
+    if (activeSystemScaleRoot) {
+      orbitSimDays += deltaDays;
+      updateOrbitPositions();
+    }
+
+    // Ship ticks
+    const events = tickShips(totalSimDays);
+    for (const evt of events) {
+      if (evt.type === "built") console.log(`🚀 ${evt.ship.name} 建造完成！`);
+      if (evt.type === "arrived") console.log(`📍 ${evt.ship.name} 抵达 ${evt.ship.locationStarId}`);
+    }
+    updateShipMeshes();
+    updateTimeHud();
+  }
+
+  // Camera-facing sprites
   stars.forEach((star) => {
     if (star.halo) star.halo.quaternion.copy(camera.quaternion);
   });
@@ -2309,13 +2626,22 @@ function animate() {
     activeSystemScaleRoot.traverse((child) => {
       if (child.userData.followCamera) child.quaternion.copy(camera.quaternion);
     });
-    // Advance orbit simulation
-    const daysPerSec = getOrbitSpeedDaysPerSec();
-    if (daysPerSec > 0) {
-      orbitSimDays += delta * daysPerSec;
-      updateOrbitPositions();
+  }
+
+  // Camera follow ship
+  if (followShipId) {
+    const ship = ships.find((s) => s.id === followShipId);
+    if (ship && ship.state === "traveling") {
+      const pos = shipWorldPosition(ship, getStarWorldPos);
+      if (pos) {
+        const target = new THREE.Vector3(pos.x, pos.y, pos.z);
+        controls.target.lerp(target, 0.05);
+        const camOffset = new THREE.Vector3(3, 2, 3);
+        camera.position.lerp(target.clone().add(camOffset), 0.03);
+      }
     }
   }
+
   renderer.render(scene, camera);
 }
 

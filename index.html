@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>2350 年人类文明太阳周边 50 光年星图</title>
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=2" />
     <script>
       window.onerror = function(msg, url, line, col, error) {
         console.error('[onerror]', msg, 'at', url + ':' + line + ':' + col, error ? error.stack : '');
@@ -97,13 +97,13 @@
           <input id="starScale" type="range" min="0.7" max="1.9" value="1.1" step="0.05" />
         </div>
 
-        <div class="control-block">
+        <div class="control-block system-view-only" style="display:none">
           <label for="skyRadius">天球半径 <span id="skyRadiusLabel">15</span> ly</label>
           <input id="skyRadius" type="range" min="0" max="55" value="15" step="1" />
         </div>
 
-        <div class="control-block">
-          <label for="orbitSpeed">公转速度 <span id="orbitSpeedLabel">1.0 天/秒</span></label>
+        <div class="control-block system-view-only" style="display:none">
+          <label for="orbitSpeed">公转/时间 <span id="orbitSpeedLabel">1.0 天/秒</span></label>
           <input id="orbitSpeed" type="range" min="0" max="10" value="1" step="0.1" />
         </div>
 
@@ -161,8 +161,32 @@
         <span><b>Y+</b> 银河自旋方向</span>
         <span><b>Z+</b> 北银极</span>
       </div>
+
+      <!-- Floating time control HUD (top-right) -->
+      <div id="timeHud" class="time-hud" aria-label="时间控制">
+        <button id="timeHudToggle" class="time-hud-toggle" type="button" title="隐藏/显示时间面板">⏱</button>
+        <div class="time-hud-inner">
+          <div class="time-hud-row">
+            <span class="time-label">已过:</span>
+            <span id="timeElapsed" class="time-value">0天</span>
+          </div>
+          <div class="time-hud-row">
+            <span class="time-label">流速:</span>
+            <span id="timeRate" class="time-value">1.0 天/秒</span>
+          </div>
+          <div class="time-hud-buttons">
+            <button id="timePauseBtn" type="button" title="暂停/继续">⏸</button>
+            <button data-time-rate="1 hour" type="button">1时</button>
+            <button data-time-rate="1 day" type="button">1天</button>
+            <button data-time-rate="1 month" type="button">1月</button>
+            <button data-time-rate="1 year" type="button">1年</button>
+            <button data-time-rate="10 year" type="button">10年</button>
+            <button id="timeResetBtn" type="button" title="重置时间">⟲</button>
+          </div>
+        </div>
+      </div>
     </main>
 
-    <script type="module" src="./app.js?v=5"></script>
+    <script type="module" src="./app.js?v=8"></script>
   </body>
 </html>
