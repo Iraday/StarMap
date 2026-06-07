@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { fallbackStars, fallbackBodies } from "./star_data.js";
+import { orbitPeriodByName, solPeriods, orbitPeriodBySma } from "./orbit_periods.js";
 
 const canvas = document.querySelector("#map");
 const detailTitle = document.querySelector("#detailTitle");
@@ -33,6 +34,8 @@ const yearSlider = document.querySelector("#yearSlider");
 const yearLabel = document.querySelector("#yearLabel");
 const skyRadius = document.querySelector("#skyRadius");
 const skyRadiusLabel = document.querySelector("#skyRadiusLabel");
+const orbitSpeed = document.querySelector("#orbitSpeed");
+const orbitSpeedLabel = document.querySelector("#orbitSpeedLabel");
 
 const MAP_RADIUS = 50;
 const INNER_RADIUS = 25;
@@ -116,6 +119,8 @@ let currentDetailTitleHtml = "";
 let currentDetailRows = [];
 let renderingFieldControls = false;
 let systemViewStar = null;
+let orbitSimDays = 0;               // cumulative simulation time in days
+const orbitingBodies = [];           // [{mesh, label, scoreLabel, glowInner, glowOuter, saturnRing, controlSphere, orbitCenter, orbitRadius, periodDays, startAngle, parentMesh}]
 const factionCycleIndex = new Map();
 const detailGroupVisibility = new Map(
   JSON.parse(localStorage.getItem("starmap-detail-groups") || "[]")
@@ -1030,6 +1035,8 @@ function clearSystemView() {
     }
   });
   bodyMeshes.length = 0;
+  orbitingBodies.length = 0;
+  orbitSimDays = 0;
   systemLayer.children.forEach((child) => disposeObject(child));
   systemLayer.clear();
   activeSystemScaleRoot = null;
@@ -1239,6 +1246,53 @@ function scaledOrbit(body, index) {
 function scaledOrbitAu(orbitAu) {
   if (!orbitAu) return 0;
   return 1.2 + Math.log10(Number(orbitAu) * 9 + 1) * 5.2;
+}
+
+/**
+ * Look up the real orbital period (days) for a body.
+ * Tries: solPeriods by body.id, orbitPeriodByName by body.name,
+ * orbitPeriodBySma by star id + closest semi-major axis,
+ * and finally Kepler estimate from orbitAu.
+ */
+function lookupOrbitalPeriod(star, body) {
+  // 1) Sol system direct lookup by body ID
+  if (star.id === "sol" || star.short === "Sol") {
+    const solP = solPeriods[body.id];
+    if (solP) return solP;
+  }
+  // 2) Exact planet name match (covers "Proxima Cen b", "GJ 887 c", etc.)
+  if (orbitPeriodByName[body.name]) return orbitPeriodByName[body.name];
+  // Strip Chinese / markdown from body name and try
+  const cleanName = String(body.name || "").replace(/[_*~]/g, "").trim();
+  if (orbitPeriodByName[cleanName]) return orbitPeriodByName[cleanName];
+
+  // 3) SMA-based lookup: find system in orbitPeriodBySma, then match closest AU
+  const au = Number(body.orbitAu);
+  if (au > 0) {
+    const tryKeys = [
+      star.id, star.short, star.name,
+      String(star.name || "").split("/").pop().trim(),
+      String(star.name || "").split("/")[0].trim()
+    ].map((k) => String(k || "").toLowerCase().trim()).filter(Boolean);
+    for (const key of tryKeys) {
+      const entries = orbitPeriodBySma[key];
+      if (entries) {
+        let best = null;
+        let bestDist = Infinity;
+        for (const e of entries) {
+          const dist = Math.abs(e.sma - au) / Math.max(au, 0.001);
+          if (dist < bestDist) { bestDist = dist; best = e; }
+        }
+        if (best && bestDist < 0.25) return best.period;
+      }
+    }
+  }
+
+  // 4) Kepler estimate: P(years) = a^1.5 for Sun-like star, P(days) = a^1.5 * 365.25
+  if (au > 0) {
+    return Math.pow(au, 1.5) * 365.25;
+  }
+  return 0;
 }
 
 function hasCuratedSystemDetails(star, bodies = []) {
@@ -1531,15 +1585,17 @@ async function openSystemView(value = selectedStar?.id) {
     bodyMeshes.push(mesh);
     bodyMeshById.set(body.id, mesh);
 
+    let innerGlow = null;
+    let outerGlow = null;
     if (body.bodyType === "star") {
       const glowColor = new THREE.Color(color);
-      const innerGlow = new THREE.Mesh(
+      innerGlow = new THREE.Mesh(
         new THREE.SphereGeometry(radius * 1.35, 32, 24),
         new THREE.MeshBasicMaterial({ color: glowColor, transparent: true, opacity: 0.25, depthWrite: false })
       );
       innerGlow.position.copy(mesh.position);
       scaleRoot.add(innerGlow);
-      const outerGlow = new THREE.Mesh(
+      outerGlow = new THREE.Mesh(
         new THREE.RingGeometry(radius * 1.1, radius * 2.8, 48),
         new THREE.MeshBasicMaterial({ color: glowColor, transparent: true, opacity: 0.13, side: THREE.DoubleSide, depthWrite: false })
       );
@@ -1548,10 +1604,11 @@ async function openSystemView(value = selectedStar?.id) {
       scaleRoot.add(outerGlow);
     }
 
+    let saturnRing = null;
     if (pc === "gas_giant" && radius > 0.28) {
       const ringInner = radius * 1.4;
       const ringOuter = radius * 2.2;
-      const saturnRing = new THREE.Mesh(
+      saturnRing = new THREE.Mesh(
         new THREE.RingGeometry(ringInner, ringOuter, 64),
         new THREE.MeshBasicMaterial({ color: new THREE.Color(color).lerp(new THREE.Color(0xffffff), 0.3), transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false })
       );
@@ -1561,11 +1618,12 @@ async function openSystemView(value = selectedStar?.id) {
       scaleRoot.add(saturnRing);
     }
 
+    let controlSphere = null;
     const infoRadius = controlRadius(body);
     if (infoRadius > 0) {
       const csGeometry = new THREE.SphereGeometry(infoRadius, 32, 24);
       const csMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.05, depthWrite: false });
-      const controlSphere = new THREE.Mesh(csGeometry, csMat);
+      controlSphere = new THREE.Mesh(csGeometry, csMat);
       controlSphere.position.copy(mesh.position);
       scaleRoot.add(controlSphere);
     }
@@ -1576,12 +1634,29 @@ async function openSystemView(value = selectedStar?.id) {
     label.scale.multiplyScalar(labelInvScale);
     label.position.copy(mesh.position).add(new THREE.Vector3(0, radius + 0.34, 0));
     scaleRoot.add(label);
+    let scoreLabel = null;
     if (habScore > 0) {
-      const scoreLabel = makeScoreLabel(habScore, body.terraformStatus ?? body.terraform_status ?? "", false, 14);
+      scoreLabel = makeScoreLabel(habScore, body.terraformStatus ?? body.terraform_status ?? "", false, 14);
       scoreLabel.scale.multiplyScalar(labelInvScale);
       scoreLabel.visible = scoreLabelsVisible();
       scoreLabel.position.copy(mesh.position).add(new THREE.Vector3(0, -radius - 0.22, 0));
       scaleRoot.add(scoreLabel);
+    }
+
+    // Register for orbit animation (skip star at center with orbitRadius===0)
+    const periodDays = lookupOrbitalPeriod(star, body);
+    if (orbitRadius > 0 && periodDays > 0) {
+      orbitingBodies.push({
+        mesh, label, scoreLabel, innerGlow, outerGlow, saturnRing, controlSphere,
+        orbitCenter: new THREE.Vector3(0, 0, 0),   // planets orbit system center
+        orbitRadius,
+        periodDays,
+        startAngle: angle,
+        bodyRadius: radius,
+        labelOffsetY: radius + 0.34,
+        scoreLabelOffsetY: -(radius + 0.22),
+        parentMesh: null
+      });
     }
   });
 
@@ -1591,10 +1666,12 @@ async function openSystemView(value = selectedStar?.id) {
     const moonAngle = moonIdx * 2.4 + 0.5;
     const radius = bodyRadiusRich(moon);
     const moonColor = bodyColorRich(moon);
+    const moonPeriod = lookupOrbitalPeriod(star, moon);
 
     if (parentMesh) {
       const orbit = makeOrbit(moonOrbitRadius, 0xd5dce8);
       orbit.position.copy(parentMesh.position);
+      orbit.userData.orbitOf = moon.id;    // tag so we can move it with parent
       scaleRoot.add(orbit);
       const mc = bodyVisualClass(moon, classifyMoon(moon));
       const moonTex = createBodyTexture(mc, moonColor, moon.id || moon.name);
@@ -1617,12 +1694,29 @@ async function openSystemView(value = selectedStar?.id) {
       label.scale.multiplyScalar(labelInvScale);
       label.position.copy(mesh.position).add(new THREE.Vector3(0, radius + 0.25, 0));
       scaleRoot.add(label);
+      let scoreLabel = null;
       if (habScore > 0) {
-        const scoreLabel = makeScoreLabel(habScore, moon.terraformStatus ?? moon.terraform_status ?? "", false, 13);
+        scoreLabel = makeScoreLabel(habScore, moon.terraformStatus ?? moon.terraform_status ?? "", false, 13);
         scoreLabel.scale.multiplyScalar(labelInvScale);
         scoreLabel.visible = scoreLabelsVisible();
         scoreLabel.position.copy(mesh.position).add(new THREE.Vector3(0, -radius - 0.20, 0));
         scaleRoot.add(scoreLabel);
+      }
+      // Register moon for orbit animation around parent
+      if (moonPeriod > 0) {
+        orbitingBodies.push({
+          mesh, label, scoreLabel,
+          innerGlow: null, outerGlow: null, saturnRing: null, controlSphere: null,
+          orbitRing: orbit,
+          orbitCenter: parentMesh.position.clone(),
+          orbitRadius: moonOrbitRadius,
+          periodDays: moonPeriod,
+          startAngle: moonAngle,
+          bodyRadius: radius,
+          labelOffsetY: radius + 0.25,
+          scoreLabelOffsetY: -(radius + 0.20),
+          parentMesh
+        });
       }
     } else {
       const globalIdx = nonMoons.length + moonIdx;
@@ -1649,12 +1743,29 @@ async function openSystemView(value = selectedStar?.id) {
       label.position.copy(mesh.position).add(new THREE.Vector3(0, radius + 0.25, 0));
       scaleRoot.add(label);
       const habScore = getHabitabilityScore(moon);
+      let scoreLabel = null;
       if (habScore > 0) {
-        const scoreLabel = makeScoreLabel(habScore, moon.terraformStatus ?? moon.terraform_status ?? "", false, 13);
+        scoreLabel = makeScoreLabel(habScore, moon.terraformStatus ?? moon.terraform_status ?? "", false, 13);
         scoreLabel.scale.multiplyScalar(labelInvScale);
         scoreLabel.visible = scoreLabelsVisible();
         scoreLabel.position.copy(mesh.position).add(new THREE.Vector3(0, -radius - 0.20, 0));
         scaleRoot.add(scoreLabel);
+      }
+      // Register orphan moon for orbit animation
+      if (orbitRadius > 0 && moonPeriod > 0) {
+        orbitingBodies.push({
+          mesh, label, scoreLabel,
+          innerGlow: null, outerGlow: null, saturnRing: null, controlSphere: null,
+          orbitRing: null,
+          orbitCenter: new THREE.Vector3(0, 0, 0),
+          orbitRadius,
+          periodDays: moonPeriod,
+          startAngle: angle,
+          bodyRadius: radius,
+          labelOffsetY: radius + 0.25,
+          scoreLabelOffsetY: -(radius + 0.20),
+          parentMesh: null
+        });
       }
     }
   });
@@ -2030,6 +2141,12 @@ function bindUi() {
     skyRadiusLabel.textContent = skyRadius.value;
     if (inSystemView) updateVisibility();
   });
+  if (orbitSpeed) {
+    orbitSpeed.addEventListener("input", () => {
+      const dps = getOrbitSpeedDaysPerSec();
+      if (orbitSpeedLabel) orbitSpeedLabel.textContent = formatOrbitSpeed(dps);
+    });
+  }
   detailSelectAll?.addEventListener("click", () => setAllDetailGroups(true));
   detailSelectNone?.addEventListener("click", () => setAllDetailGroups(false));
 
@@ -2121,6 +2238,63 @@ function resize() {
   camera.updateProjectionMatrix();
 }
 
+function getOrbitSpeedDaysPerSec() {
+  if (!orbitSpeed) return 0;
+  const v = Number(orbitSpeed.value);
+  // Slider 0..10: 0=paused, 1=1d/s, 5=30d/s, 8=365d/s, 10=3650d/s
+  // Exponential curve: 0 → pause, then 10^(v*0.356 - 0.356) ≈ 1..3650
+  if (v <= 0) return 0;
+  return Math.pow(10, v * 0.356 - 0.356);
+}
+
+const orbitSpeedPresets = [0, 1, 3, 7, 15, 30, 90, 180, 365, 1000, 3650];
+
+function formatOrbitSpeed(daysPerSec) {
+  if (daysPerSec <= 0) return "暂停";
+  if (daysPerSec < 1.5) return `${daysPerSec.toFixed(1)} 天/秒`;
+  if (daysPerSec < 365) return `${Math.round(daysPerSec)} 天/秒`;
+  const yps = daysPerSec / 365.25;
+  return `${yps.toFixed(1)} 年/秒`;
+}
+
+function updateOrbitPositions() {
+  if (orbitingBodies.length === 0) return;
+  const TWO_PI = Math.PI * 2;
+
+  // First pass: update planets (parentMesh === null)
+  for (const ob of orbitingBodies) {
+    if (ob.parentMesh) continue;
+    const angularVel = (ob.periodDays > 0) ? TWO_PI / ob.periodDays : 0;
+    const angle = ob.startAngle + angularVel * orbitSimDays;
+    const cx = ob.orbitCenter.x;
+    const cz = ob.orbitCenter.z;
+    const x = cx + Math.cos(angle) * ob.orbitRadius;
+    const z = cz + Math.sin(angle) * ob.orbitRadius;
+    ob.mesh.position.set(x, 0, z);
+    if (ob.label) ob.label.position.set(x, ob.labelOffsetY, z);
+    if (ob.scoreLabel) ob.scoreLabel.position.set(x, ob.scoreLabelOffsetY, z);
+    if (ob.innerGlow) ob.innerGlow.position.set(x, 0, z);
+    if (ob.outerGlow) ob.outerGlow.position.set(x, 0, z);
+    if (ob.saturnRing) ob.saturnRing.position.set(x, 0, z);
+    if (ob.controlSphere) ob.controlSphere.position.set(x, 0, z);
+  }
+
+  // Second pass: update moons (parentMesh !== null) — their center follows parent
+  for (const ob of orbitingBodies) {
+    if (!ob.parentMesh) continue;
+    const parentPos = ob.parentMesh.position;
+    const angularVel = (ob.periodDays > 0) ? TWO_PI / ob.periodDays : 0;
+    const angle = ob.startAngle + angularVel * orbitSimDays;
+    const x = parentPos.x + Math.cos(angle) * ob.orbitRadius;
+    const z = parentPos.z + Math.sin(angle) * ob.orbitRadius;
+    ob.mesh.position.set(x, parentPos.y, z);
+    if (ob.label) ob.label.position.set(x, parentPos.y + ob.labelOffsetY, z);
+    if (ob.scoreLabel) ob.scoreLabel.position.set(x, parentPos.y + ob.scoreLabelOffsetY, z);
+    // Move the moon's orbit ring to follow parent
+    if (ob.orbitRing) ob.orbitRing.position.copy(parentPos);
+  }
+}
+
 function animate() {
   requestAnimationFrame(animate);
   const now = performance.now();
@@ -2135,6 +2309,12 @@ function animate() {
     activeSystemScaleRoot.traverse((child) => {
       if (child.userData.followCamera) child.quaternion.copy(camera.quaternion);
     });
+    // Advance orbit simulation
+    const daysPerSec = getOrbitSpeedDaysPerSec();
+    if (daysPerSec > 0) {
+      orbitSimDays += delta * daysPerSec;
+      updateOrbitPositions();
+    }
   }
   renderer.render(scene, camera);
 }
