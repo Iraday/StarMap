@@ -197,12 +197,15 @@
         <div class="fleet-panel-inner">
           <div class="fleet-panel-header">
             <span>舰船控制</span>
-            <span id="shipSelectionCount" class="fleet-panel-count">0</span>
+            <span class="fleet-panel-tools">
+              <span id="shipSelectionCount" class="fleet-panel-count">0</span>
+              <button id="shipBulkToggle" class="icon-button" type="button" title="批量选择">☑</button>
+            </span>
           </div>
           <div class="fleet-tabs" role="tablist" aria-label="舰船页签">
             <button class="fleet-tab active" data-fleet-tab="ships" type="button">舰船</button>
             <button class="fleet-tab" data-fleet-tab="fleets" type="button">舰队</button>
-            <button class="fleet-tab" data-fleet-tab="commands" type="button">命令</button>
+            <button class="fleet-tab" data-fleet-tab="commands" type="button">生成</button>
           </div>
           <section id="shipTabShips" class="fleet-tab-panel active" aria-label="所有舰船">
             <div class="ship-filter-row">
@@ -210,6 +213,14 @@
               <select id="shipTypeFilter" title="按舰船类型筛选">
                 <option value="all">全部类型</option>
               </select>
+            </div>
+            <div id="shipBulkPanel" class="ship-bulk-panel" style="display:none">
+              <input id="bulkFactionInput" type="text" list="shipFactionNames" placeholder="批量所属势力" />
+              <input id="bulkSpeedInput" type="text" placeholder="批量速度，如 1ly/sec" />
+              <button id="bulkFleetBtn" type="button">编队</button>
+              <button id="bulkFactionBtn" type="button">改势力</button>
+              <button id="bulkSpeedBtn" type="button">改速度</button>
+              <button id="bulkDeleteBtn" type="button">删除</button>
             </div>
             <div id="shipList" class="ship-list"></div>
           </section>
@@ -220,39 +231,51 @@
             </div>
             <div id="fleetList" class="fleet-list"></div>
           </section>
-          <section id="shipTabCommands" class="fleet-tab-panel" aria-label="舰船命令">
+          <section id="shipTabCommands" class="fleet-tab-panel" aria-label="舰船生成">
             <div id="shipClassPalette" class="ship-class-palette" aria-label="舰级选择"></div>
             <div class="ship-control-grid" aria-label="舰船控制">
               <input id="shipNameInput" type="text" placeholder="舰名" />
               <select id="shipClassSelect" title="舰级"></select>
               <input id="shipLocationInput" type="text" list="navObjectNames" placeholder="起点恒星/天体/舰船" />
               <input id="shipFactionInput" type="text" list="shipFactionNames" placeholder="所属势力，留空则跟随起点" />
+              <input id="shipSpeedInput" type="text" placeholder="速度，如 0.4c / 1ly/sec / 1000000km/hour" />
               <datalist id="shipFactionNames"></datalist>
               <div class="ship-control-buttons">
                 <button id="deployShipBtn" type="button">部署</button>
                 <button id="buildShipBtn" type="button">建造</button>
               </div>
-              <input id="shipDestinationInput" type="text" list="navObjectNames" placeholder="目的地恒星/天体/舰船" />
-              <button id="moveShipBtn" type="button">航行</button>
-              <div class="command-mode-row" aria-label="右键命令模式">
-                <button class="command-mode active" data-command-mode="move" type="button">右键移动</button>
-                <button class="command-mode" data-command-mode="orbit" type="button">右键入轨</button>
-              </div>
-              <label class="ship-command-toggle"><input id="orbitMouseAdjustToggle" type="checkbox" checked /> 鼠标调整入轨</label>
-              <div class="orbit-command-panel">
-                <input id="shipOrbitRadiusInput" type="number" min="0.000001" step="0.00001" value="0.0003" title="轨道半径 ly" />
-                <span>ly 半径</span>
-                <input id="shipOrbitSpeedInput" type="number" min="0" step="0.000001" value="0.00001" title="轨道速度 c；0 表示使用周期" />
-                <span>c 速度</span>
-                <input id="shipOrbitYears" type="number" min="0" step="1" value="0" title="年" /><span>年</span>
-                <input id="shipOrbitMonths" type="number" min="0" step="1" value="0" title="月" /><span>月</span>
-                <input id="shipOrbitDays" type="number" min="0" step="1" value="180" title="日" /><span>日</span>
-                <input id="shipOrbitHours" type="number" min="0" step="1" value="0" title="时" /><span>时</span>
-                <input id="shipOrbitMinutes" type="number" min="0" step="1" value="0" title="分" /><span>分</span>
-                <input id="shipOrbitSeconds" type="number" min="0" step="1" value="0" title="秒" /><span>秒</span>
-              </div>
             </div>
           </section>
+        </div>
+      </div>
+
+      <div id="shipCommandPanel" class="ship-command-panel disabled" style="display:none" aria-label="舰船命令">
+        <button id="shipCommandToggle" class="panel-hide" type="button" title="隐藏/显示舰船命令">×</button>
+        <div class="ship-command-header">
+          <span>舰船命令</span>
+          <span id="shipCommandCount" class="fleet-panel-count">0</span>
+        </div>
+        <div class="ship-control-grid">
+          <input id="shipDestinationInput" type="text" list="navObjectNames" placeholder="目的地恒星/天体/舰船" />
+          <button id="moveShipBtn" type="button">航行</button>
+          <div class="route-modifier-hint">Ctrl 追加航点；Shift 巡逻/循环；Ctrl+Shift 追加巡逻段</div>
+          <div class="command-mode-row" aria-label="右键命令模式">
+            <button class="command-mode active" data-command-mode="move" type="button">右键移动</button>
+            <button class="command-mode" data-command-mode="orbit" type="button">右键入轨</button>
+          </div>
+          <label class="ship-command-toggle"><input id="orbitMouseAdjustToggle" type="checkbox" checked /> 鼠标调整入轨</label>
+          <div class="orbit-command-panel">
+            <input id="shipOrbitRadiusInput" type="number" min="0.000001" step="0.00001" value="0.0003" title="轨道半径 ly" />
+            <span>ly 半径</span>
+            <input id="shipOrbitSpeedInput" type="number" min="0" step="0.000001" value="0.00001" title="轨道速度 c；0 表示使用周期" />
+            <span>c 速度</span>
+            <input id="shipOrbitYears" type="number" min="0" step="1" value="0" title="年" /><span>年</span>
+            <input id="shipOrbitMonths" type="number" min="0" step="1" value="0" title="月" /><span>月</span>
+            <input id="shipOrbitDays" type="number" min="0" step="1" value="180" title="日" /><span>日</span>
+            <input id="shipOrbitHours" type="number" min="0" step="1" value="0" title="时" /><span>时</span>
+            <input id="shipOrbitMinutes" type="number" min="0" step="1" value="0" title="分" /><span>分</span>
+            <input id="shipOrbitSeconds" type="number" min="0" step="1" value="0" title="秒" /><span>秒</span>
+          </div>
         </div>
       </div>
 

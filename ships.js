@@ -81,6 +81,18 @@ function cloneOrbit(orbit) {
   };
 }
 
+function cloneRouteWaypoint(waypoint) {
+  if (!waypoint) return null;
+  return {
+    starId: waypoint.starId ?? waypoint.destinationStarId ?? null,
+    bodyId: waypoint.bodyId ?? waypoint.destinationBodyId ?? null,
+    point: clonePoint(waypoint.point ?? waypoint.destinationPoint),
+    label: waypoint.label || waypoint.destinationLabel || waypoint.starId || waypoint.destinationStarId || "航点",
+    keepPoint: Boolean(waypoint.keepPoint ?? waypoint.destinationKeepsPoint ?? true),
+    speed: waypoint.speed !== undefined ? Number(waypoint.speed) : undefined,
+  };
+}
+
 function makeOrbit(centerPoint, opts = {}) {
   const radiusLy = Math.max(Number(opts.radiusLy ?? opts.orbitRadiusLy ?? 0.0001), 0.000001);
   const periodDays = Math.max(Number(opts.periodDays ?? opts.orbitPeriodDays ?? 30), 0.000001);
@@ -128,7 +140,7 @@ function hydrateShip(record) {
     name: record.name || `${cls.label}-${id}`,
     shipClass: record.shipClass in shipClasses ? record.shipClass : "shuttle",
     classInfo: cls,
-    faction: record.faction || "",
+    faction: record.faction || "无/无所属",
     locationStarId: record.locationStarId ?? null,
     locationBodyId: record.locationBodyId ?? null,
     locationPoint: clonePoint(record.locationPoint),
@@ -149,6 +161,7 @@ function hydrateShip(record) {
     travelDistanceLy: Number(record.travelDistanceLy || 0),
     crewProperTimeDays: Number(record.crewProperTimeDays || 0),
     crewTotalProperDays: Number(record.crewTotalProperDays || 0),
+    routeQueue: Array.isArray(record.routeQueue) ? record.routeQueue.map(cloneRouteWaypoint).filter(Boolean) : [],
     pendingOrbit: cloneOrbit(record.pendingOrbit),
     orbit: cloneOrbit(record.orbit),
     mesh: null,
@@ -165,7 +178,7 @@ export function createShip(opts) {
     id,
     name: opts.name || `${cls.label}-${nextShipId}`,
     shipClass: opts.shipClass,
-    faction: opts.faction || "",
+    faction: opts.faction || "无/无所属",
     locationStarId: opts.locationStarId,
     locationBodyId: opts.locationBodyId || null,
     locationPoint: opts.locationPoint || null,
@@ -173,7 +186,7 @@ export function createShip(opts) {
     buildStartDay: opts.buildStartDay || 0,
     buildDurationDays: cls.buildDays,
     buildProgressFrac: opts.instant || cls.buildDays <= 0 ? 1 : 0,
-    travelSpeed: Math.min(opts.travelSpeed ?? cls.maxSpeed, cls.ftl ? 10 : cls.maxSpeed),
+    travelSpeed: Number(opts.travelSpeed ?? cls.maxSpeed),
   });
   ships.push(ship);
   return ship;
@@ -186,7 +199,7 @@ export function createAsteroid(opts) {
     locationStarId: opts.locationStarId || null,
     locationPoint: opts.locationPoint || null,
     travelSpeed: opts.speed || 0.0001,
-    faction: opts.faction || "",
+    faction: opts.faction || "无/无所属",
     instant: true,
   });
   if (opts.destinationStarId && opts.distanceFn && opts.currentSimDay !== undefined) {
@@ -209,8 +222,9 @@ function assertCanMove(ship) {
 
 function startTravel(ship, currentSimDay, destination, opts = {}) {
   assertCanMove(ship);
-  const speedLimit = ship.classInfo.ftl ? 999 : ship.classInfo.maxSpeed;
-  const speed = Math.min(Number(opts.speed ?? ship.travelSpeed), speedLimit);
+  const requestedSpeed = Number(opts.speed ?? ship.travelSpeed);
+  const speedLimit = opts.ignoreSpeedLimit ? Infinity : (ship.classInfo.ftl ? Infinity : Math.max(ship.classInfo.maxSpeed, requestedSpeed));
+  const speed = Math.min(requestedSpeed, speedLimit);
   if (speed <= 0) throw new Error(`${ship.name} has no valid travel speed`);
 
   const distanceLy = Number(opts.distanceLy ?? destination.distanceLy ?? 0);
@@ -232,7 +246,46 @@ function startTravel(ship, currentSimDay, destination, opts = {}) {
   ship.travelSpeed = speed;
   ship.orbit = null;
   ship.pendingOrbit = null;
+  if (opts.clearQueue) ship.routeQueue = [];
   return ship;
+}
+
+function currentShipPoint(ship) {
+  if (ship.state === "traveling") return clonePoint(ship.destinationPoint) || clonePoint(ship.locationPoint);
+  return clonePoint(ship.locationPoint);
+}
+
+function startQueuedWaypoint(ship, waypoint, currentSimDay) {
+  const wp = cloneRouteWaypoint(waypoint);
+  if (!wp?.point) return null;
+  const fromPoint = currentShipPoint(ship);
+  const distanceLy = Math.max(distancePoints(fromPoint, wp.point), 0.000001);
+  return startTravel(ship, currentSimDay, {
+    starId: wp.starId,
+    bodyId: wp.bodyId,
+    point: wp.point,
+    label: wp.label,
+    keepPoint: wp.keepPoint,
+    distanceLy,
+  }, {
+    fromPoint,
+    distanceLy,
+    speed: wp.speed ?? ship.travelSpeed,
+    ignoreSpeedLimit: true,
+  });
+}
+
+function appendPatrolReturn(ship, originPoint, opts = {}) {
+  const point = clonePoint(originPoint);
+  if (!point) return;
+  ship.routeQueue.push({
+    starId: opts.returnStarId || null,
+    bodyId: opts.returnBodyId || null,
+    point,
+    label: opts.returnLabel || "巡逻返航点",
+    keepPoint: true,
+    speed: opts.speed !== undefined ? Number(opts.speed) : undefined,
+  });
 }
 
 export function commandTravel(shipId, destStarId, distanceFn, currentSimDay, opts = {}) {
@@ -245,14 +298,26 @@ export function commandTravel(shipId, destStarId, distanceFn, currentSimDay, opt
   if (!(distanceLy > 0) && ship.locationStarId) {
     distanceLy = distanceFn(ship.locationStarId, destStarId);
   }
-  return startTravel(ship, currentSimDay, {
+  const waypoint = cloneRouteWaypoint({
     starId: destStarId,
     bodyId: opts.destinationBodyId || null,
     point: opts.destinationPoint || null,
     label: opts.destinationLabel || destStarId,
     keepPoint: false,
+    speed: opts.speed,
+  });
+  const originPoint = clonePoint(opts.routeOriginPoint || opts.fromPoint || ship.locationPoint);
+  if (opts.appendRoute && (ship.state === "traveling" || ship.routeQueue.length > 0)) {
+    ship.routeQueue.push(waypoint);
+    if (opts.patrol) appendPatrolReturn(ship, originPoint, opts);
+    return ship;
+  }
+  const moved = startTravel(ship, currentSimDay, {
+    ...waypoint,
     distanceLy,
-  }, { ...opts, distanceLy });
+  }, { ...opts, distanceLy, clearQueue: !opts.appendRoute, ignoreSpeedLimit: true });
+  if (opts.patrol) appendPatrolReturn(ship, originPoint, opts);
+  return moved;
 }
 
 export function commandTravelToPoint(shipId, destinationPoint, currentSimDay, opts = {}) {
@@ -261,14 +326,26 @@ export function commandTravelToPoint(shipId, destinationPoint, currentSimDay, op
   const fromPoint = clonePoint(opts.fromPoint || ship.locationPoint);
   const point = clonePoint(destinationPoint);
   const distanceLy = Number(opts.distanceLy || distancePoints(fromPoint, point));
-  return startTravel(ship, currentSimDay, {
+  const waypoint = cloneRouteWaypoint({
     starId: opts.destinationStarId || null,
     bodyId: opts.destinationBodyId || null,
     point,
     label: opts.destinationLabel || "自由坐标",
     keepPoint: true,
+    speed: opts.speed,
+  });
+  const originPoint = clonePoint(opts.routeOriginPoint || fromPoint);
+  if (opts.appendRoute && (ship.state === "traveling" || ship.routeQueue.length > 0)) {
+    ship.routeQueue.push(waypoint);
+    if (opts.patrol) appendPatrolReturn(ship, originPoint, opts);
+    return ship;
+  }
+  const moved = startTravel(ship, currentSimDay, {
+    ...waypoint,
     distanceLy,
-  }, { ...opts, fromPoint, distanceLy });
+  }, { ...opts, fromPoint, distanceLy, clearQueue: !opts.appendRoute, ignoreSpeedLimit: true });
+  if (opts.patrol) appendPatrolReturn(ship, originPoint, opts);
+  return moved;
 }
 
 export function commandOrbitAroundPoint(shipId, centerPoint, currentSimDay, opts = {}) {
@@ -305,12 +382,14 @@ export function tickShips(currentSimDay) {
       const elapsed = currentSimDay - ship.travelStartDay;
       ship.travelProgressFrac = ship.travelDurationDays > 0 ? Math.min(elapsed / ship.travelDurationDays, 1) : 1;
       if (ship.travelProgressFrac >= 1) {
+        const hasQueuedRoute = ship.routeQueue.length > 0;
+        const arrivalPoint = clonePoint(ship.destinationPoint);
         ship.state = "idle";
         ship.travelProgressFrac = 1;
         ship.crewTotalProperDays += ship.crewProperTimeDays;
         ship.locationStarId = ship.destinationStarId;
         ship.locationBodyId = ship.destinationBodyId;
-        ship.locationPoint = ship.destinationKeepsPoint || ship.destinationBodyId ? clonePoint(ship.destinationPoint) : (ship.destinationStarId ? null : clonePoint(ship.destinationPoint));
+        ship.locationPoint = hasQueuedRoute ? arrivalPoint : (ship.destinationKeepsPoint || ship.destinationBodyId ? arrivalPoint : (ship.destinationStarId ? null : arrivalPoint));
         ship.destinationStarId = null;
         ship.destinationBodyId = null;
         ship.destinationPoint = null;
@@ -322,6 +401,11 @@ export function tickShips(currentSimDay) {
           ship.pendingOrbit = null;
           ship.locationPoint = orbitPoint(ship.orbit, currentSimDay);
           events.push({ type: "orbit", ship });
+        }
+        if (!ship.pendingOrbit && ship.routeQueue.length > 0) {
+          const next = ship.routeQueue.shift();
+          startQueuedWaypoint(ship, next, currentSimDay);
+          events.push({ type: "route", ship, waypoint: next });
         }
         events.push({ type: "arrived", ship });
       }
@@ -385,6 +469,7 @@ export function shipInfo(ship) {
     destination,
     destinationStarId: ship.destinationStarId,
     destinationPoint: clonePoint(ship.destinationPoint),
+    routeQueue: ship.routeQueue.map(cloneRouteWaypoint),
     crew: cls.crew,
     maxSpeed: `${cls.maxSpeed} c`,
     ftl: cls.ftl,
