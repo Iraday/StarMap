@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>2350 年人类文明太阳周边 50 光年星图</title>
-    <link rel="stylesheet" href="./styles.css?v=4" />
+    <link rel="stylesheet" href="./styles.css?v=5" />
     <script>
       window.onerror = function(msg, url, line, col, error) {
         console.error('[onerror]', msg, 'at', url + ':' + line + ':' + col, error ? error.stack : '');
@@ -55,7 +55,7 @@
       </section>
 
       <section class="panel panel-left" aria-label="地图控制">
-        <button id="toggleLeft" class="panel-toggle panel-hide" type="button" title="隐藏/显示控制面板">×</button>
+        <button id="toggleLeft" class="panel-toggle panel-hide" type="button" title="隐藏">×</button>
         <div class="panel-left-inner" id="panelLeftInner">
         <div class="mast">
           <p class="kicker">AD 2350 / 50 ly</p>
@@ -125,6 +125,11 @@
           <input id="starScale" type="range" min="0.7" max="1.9" value="1.1" step="0.05" />
         </div>
 
+        <div class="control-block">
+          <label for="labelScale">名称尺寸 <span id="labelScaleLabel">1.00</span></label>
+          <input id="labelScale" type="range" min="0.3" max="2" value="1" step="0.05" />
+        </div>
+
         <div class="control-block system-view-only" style="display:none">
           <label for="skyRadius">天球半径 <span id="skyRadiusLabel">15</span> ly</label>
           <input id="skyRadius" type="range" min="0" max="55" value="15" step="1" />
@@ -148,8 +153,28 @@
           <label for="agentAction">Agent 接口</label>
           <select id="agentAction">
             <option value="none">-- 选择操作 --</option>
-            <option value="single">单星操作 (Zoom/内部/最近)</option>
-            <option value="distance">计算距离</option>
+            <optgroup label="恒星操作">
+              <option value="single">单星操作 (Zoom/内部/最近)</option>
+              <option value="distance">计算距离</option>
+            </optgroup>
+            <optgroup label="时间控制">
+              <option value="api-time">暂停/继续/设流速/重置</option>
+            </optgroup>
+            <optgroup label="舰船操作">
+              <option value="api-ship">部署/建造/移动/删除</option>
+              <option value="api-ship-route">航线/巡逻/入轨</option>
+              <option value="api-fleet">舰队/编队/选择</option>
+            </optgroup>
+            <optgroup label="小行星/彗星">
+              <option value="api-asteroid">添加/移动小行星</option>
+            </optgroup>
+            <optgroup label="界面控制">
+              <option value="api-ui">面板显隐/拖拽/键位</option>
+              <option value="api-label">名称尺寸/标签</option>
+            </optgroup>
+            <optgroup label="状态">
+              <option value="api-state">保存/读取/导出/状态</option>
+            </optgroup>
           </select>
           <div id="agentSingleTools" style="display: none; margin-top: 8px;">
             <input id="agentStar" type="text" list="starNames" placeholder="gj1002 / Teegarden / 李-哈特曼" />
@@ -176,7 +201,7 @@
       </section>
 
       <section class="panel panel-right" aria-label="恒星系详情">
-        <button id="toggleRight" class="panel-toggle panel-toggle-right panel-hide" type="button" title="隐藏/显示详情面板">×</button>
+        <button id="toggleRight" class="panel-toggle panel-toggle-right panel-hide" type="button" title="隐藏">×</button>
         <div class="detail-head">
           <div class="detail-head-text">
             <p class="kicker">选中恒星系</p>
@@ -196,7 +221,7 @@
 
       <!-- Fleet management panel (bottom-left floating) -->
       <div id="fleetPanel" class="fleet-panel" aria-label="舰队管理">
-        <button id="fleetPanelToggle" class="fleet-panel-toggle panel-hide" type="button" title="舰队管理">×</button>
+        <button id="fleetPanelToggle" class="fleet-panel-toggle panel-hide" type="button" title="隐藏">×</button>
         <div class="fleet-panel-inner">
           <div class="fleet-panel-header">
             <span>舰船控制</span>
@@ -231,6 +256,10 @@
             <div class="ship-control-buttons">
               <button id="createFleetBtn" type="button">编队</button>
               <button id="cycleFleetShipBtn" type="button">循环舰船</button>
+              <button id="fleetBulkToggle" class="icon-button" type="button" title="批量选择">☑</button>
+            </div>
+            <div id="fleetBulkPanel" class="ship-bulk-panel" style="display:none">
+              <button id="fleetBulkDeleteBtn" type="button">删除选中舰队</button>
             </div>
             <div id="fleetList" class="fleet-list"></div>
           </section>
@@ -253,7 +282,7 @@
       </div>
 
       <div id="shipCommandPanel" class="ship-command-panel disabled" style="display:none" aria-label="舰船命令">
-        <button id="shipCommandToggle" class="panel-hide" type="button" title="隐藏/显示舰船命令">×</button>
+        <button id="shipCommandToggle" class="panel-hide" type="button" title="隐藏">×</button>
         <div class="ship-command-header">
           <span>舰船命令</span>
           <span id="shipCommandCount" class="fleet-panel-count">0</span>
@@ -287,7 +316,7 @@
         <div class="ship-info-header">
           <span id="shipInfoTitle" class="ship-info-title">舰船信息</span>
           <button id="shipInfoEditBtn" class="ship-info-close info-edit-btn" type="button" title="编辑舰船信息">✎</button>
-          <button id="shipInfoClose" class="ship-info-close panel-hide" type="button" title="关闭">×</button>
+          <button id="shipInfoClose" class="ship-info-close panel-hide" type="button" title="隐藏">×</button>
         </div>
         <div id="shipInfoContent" class="ship-info-content"></div>
         <div class="ship-info-progress-wrap" id="shipProgressWrap" style="display:none">
@@ -304,7 +333,7 @@
 
       <!-- Floating time control HUD (top-right) -->
       <div id="timeHud" class="time-hud" aria-label="时间控制">
-        <button id="timeHudToggle" class="time-hud-toggle panel-hide" type="button" title="隐藏/显示时间面板">×</button>
+        <button id="timeHudToggle" class="time-hud-toggle panel-hide" type="button" title="隐藏">×</button>
         <div class="time-hud-inner">
           <div class="time-hud-row">
             <span class="time-label">已过:</span>
@@ -348,6 +377,6 @@
       </div>
     </main>
 
-    <script type="module" src="./app.js?v=10"></script>
+    <script type="module" src="./app.js?v=13"></script>
   </body>
 </html>

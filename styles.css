@@ -1183,7 +1183,7 @@ button[aria-pressed="true"] {
 .ship-info-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 4px;
   margin-bottom: 8px;
 }
 
@@ -1191,6 +1191,11 @@ button[aria-pressed="true"] {
   font-size: 15px;
   font-weight: 700;
   color: var(--accent);
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1324,20 +1329,20 @@ button[aria-pressed="true"] {
 }
 
 .panel-lock {
-  position: absolute;
-  top: 6px;
-  right: 34px;
-  z-index: 4;
   display: grid;
   place-items: center;
   min-height: 22px;
   min-width: 22px;
+  width: 22px;
+  height: 22px;
   border: 1px solid var(--panel-border);
   border-radius: 4px;
   background: rgba(237, 243, 248, 0.08);
   color: var(--muted);
   cursor: pointer;
   font-size: 12px;
+  padding: 0;
+  flex-shrink: 0;
 }
 
 .panel-lock.locked {
@@ -1348,9 +1353,13 @@ button[aria-pressed="true"] {
 .fleet-panel-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding-right: 44px;
+  gap: 4px;
   cursor: grab;
+}
+
+.fleet-panel-header > span:first-child {
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .fleet-panel-count {
@@ -1708,4 +1717,93 @@ button[aria-pressed="true"] {
     max-width: calc(100vw - 20px);
     min-width: auto;
   }
+}
+
+/* ── Standardize all top-right panel icons (lock/hide) ── */
+.panel-hide,
+.panel-lock,
+.info-edit-btn,
+.ship-info-close,
+.ship-info-minimize {
+  display: grid;
+  place-items: center;
+  min-width: 22px;
+  width: 22px;
+  height: 22px;
+  min-height: 22px;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: rgba(237, 243, 248, 0.08);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+/* ── Fleet-specific ship window ── */
+.fleet-ship-window {
+  position: absolute;
+  z-index: 50;
+  min-width: 320px;
+  max-width: 440px;
+  max-height: 380px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: var(--panel);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.fleet-ship-window-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: grab;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.fleet-ship-window-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fleet-ship-window-list {
+  flex: 1 1 0;
+  overflow-y: auto;
+  padding: 4px 6px;
+  min-height: 60px;
+}
+
+.fleet-ship-window-list.drag-over {
+  background: rgba(114, 214, 201, 0.08);
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+}
+
+.fleet-window-ship-row {
+  cursor: grab;
+}
+
+.fleet-window-ship-row.dragging {
+  opacity: 0.4;
+}
+
+.fleet-row-icon[data-open-fleet-window] {
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.fleet-row-icon[data-open-fleet-window]:hover {
+  color: var(--accent);
 }
