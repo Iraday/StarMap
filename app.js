@@ -565,10 +565,10 @@ function addTerritories() {
     ["wolf359", "lalande", "无限未来", false],
     ["lalande", "gj273", "无限未来", false],
     ["gj273", "gj251", "无限未来", true],
-    ["gj1061", "kapteyn", "人类群星联合", false],
-    ["kapteyn", "hd20794", "人类群星联合", false],
-    ["kapteyn", "40eridani", "人类群星联合", false],
-    ["40eridani", "ltt1445", "人类群星联合", true],
+    ["gj1061", "kapteyn", "人类群星", false],
+    ["kapteyn", "hd20794", "人类群星", false],
+    ["kapteyn", "40eridani", "人类群星", false],
+    ["40eridani", "ltt1445", "人类群星", true],
     ["gj1002", "li-hartman", "星蓝元素", true],
     ["li-hartman", "trappist-1", "星蓝元素", true],
     ["gj1002", "lhs1140", "星蓝元素", true],
@@ -577,8 +577,8 @@ function addTerritories() {
     ["hd219134", "55cnc", "S&F", true],
     ["tau-ceti", "teegarden", "美丽花园巨企", false],
     ["teegarden", "gj357", "美丽花园巨企", true],
-    ["alpha", "epsilon-indi", "近邻三角军工托管区", true],
-    ["barnard", "alpha", "近邻三角军工托管区", true],
+    ["alpha", "epsilon-indi", "半人马联合重工", true],
+    ["barnard", "alpha", "半人马联合重工", true],
     ["gj682", "gj667c", "南爪边境开发集团", false],
     ["beta-hydri", "fomalhaut", "外环水蛇-北落师门采掘同盟", true],
     ["fomalhaut", "vega", "外环水蛇-北落师门采掘同盟", true]
@@ -588,9 +588,10 @@ function addTerritories() {
     const starA = starById.get(a);
     const starB = starById.get(b);
     if (!starA || !starB) return;
+    const color = factionColors[faction] || "#888888";
     const material = dashed
-      ? new THREE.LineDashedMaterial({ color: factionColors[faction], dashSize: 0.7, gapSize: 0.45, transparent: true, opacity: 0.54 })
-      : new THREE.LineBasicMaterial({ color: factionColors[faction], transparent: true, opacity: 0.66 });
+      ? new THREE.LineDashedMaterial({ color, dashSize: 0.7, gapSize: 0.45, transparent: true, opacity: 0.54 })
+      : new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.66 });
     const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([toWorld(starA.xyz), toWorld(starB.xyz)]), material);
     if (dashed) line.computeLineDistances();
     line.userData.link = [a, b];
