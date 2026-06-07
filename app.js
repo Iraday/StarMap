@@ -4844,15 +4844,29 @@ function updateShipMeshes() {
         entry.mesh.scale.setScalar(shipVisualScale(ship, isSelected, 1.15));
         // Scale label
         if (entry.label.userData.baseScaleX) entry.label.scale.set(entry.label.userData.baseScaleX * shipLabelFactor, entry.label.userData.baseScaleY * shipLabelFactor, 1);
-        // Update trail
+        // Update trail (reuse pre-allocated buffer for perf)
         entry.lastPositions.push(new THREE.Vector3(pos.x, pos.y, pos.z));
         if (entry.lastPositions.length > 80) entry.lastPositions.shift();
-        if (entry.trail) { starLayer.remove(entry.trail); entry.trail.geometry.dispose(); }
         if (entry.lastPositions.length > 2) {
-          const trailColor = getShipColor(ship.shipClass);
-          const tGeo = new THREE.BufferGeometry().setFromPoints(entry.lastPositions);
-          entry.trail = new THREE.Line(tGeo, new THREE.LineBasicMaterial({ color: trailColor, transparent: true, opacity: 0.3 }));
-          starLayer.add(entry.trail);
+          if (!entry.trail) {
+            const trailColor = getShipColor(ship.shipClass);
+            const maxTrail = 80;
+            const posArr = new Float32Array(maxTrail * 3);
+            const tGeo = new THREE.BufferGeometry();
+            tGeo.setAttribute("position", new THREE.BufferAttribute(posArr, 3));
+            tGeo.setDrawRange(0, 0);
+            entry.trail = new THREE.Line(tGeo, new THREE.LineBasicMaterial({ color: trailColor, transparent: true, opacity: 0.3 }));
+            starLayer.add(entry.trail);
+          }
+          const posAttr = entry.trail.geometry.getAttribute("position");
+          const n = entry.lastPositions.length;
+          for (let i = 0; i < n; i++) {
+            posAttr.array[i * 3] = entry.lastPositions[i].x;
+            posAttr.array[i * 3 + 1] = entry.lastPositions[i].y;
+            posAttr.array[i * 3 + 2] = entry.lastPositions[i].z;
+          }
+          posAttr.needsUpdate = true;
+          entry.trail.geometry.setDrawRange(0, n);
         }
       }
     } else if (ship.state === "building") {
@@ -5137,6 +5151,99 @@ function buildFleetPanel() {
   updateFleetPanel();
 }
 
+// ── Virtual scrolling for ship list ───────────────────────────────────
+const SHIP_ROW_HEIGHT = 35; // 32px min-height + 3px gap
+const SHIP_VIRTUAL_BUFFER = 8; // extra rows above/below viewport
+
+let _vsFilteredShips = []; // cached reference for scroll handler
+let _vsScrollHandler = null; // to avoid re-binding
+
+function renderVirtualShipList(container, filteredShips) {
+  _vsFilteredShips = filteredShips;
+  const total = filteredShips.length;
+  if (total === 0) {
+    container.innerHTML = `<div style="color:var(--muted);font-size:12px;padding:4px 0;">暂无舰船</div>`;
+    container.style.position = "";
+    return;
+  }
+  // For small lists, skip virtualization overhead
+  if (total <= 50) {
+    container.style.position = "";
+    container.innerHTML = filteredShips.map((ship) => _shipRowHtml(ship)).join("");
+    _bindShipListEvents(container);
+    return;
+  }
+  // Virtual scroll mode
+  container.style.position = "relative";
+  const totalHeight = total * SHIP_ROW_HEIGHT;
+  // Use a sentinel to set scroll height
+  container.innerHTML = `<div class="vs-sentinel" style="height:${totalHeight}px;pointer-events:none;"></div><div class="vs-viewport" style="position:absolute;top:0;left:0;right:0;"></div>`;
+  const viewport = container.querySelector(".vs-viewport");
+
+  function renderVisibleRows() {
+    const scrollTop = container.scrollTop;
+    const viewHeight = container.clientHeight;
+    const startIdx = Math.max(0, Math.floor(scrollTop / SHIP_ROW_HEIGHT) - SHIP_VIRTUAL_BUFFER);
+    const endIdx = Math.min(total, Math.ceil((scrollTop + viewHeight) / SHIP_ROW_HEIGHT) + SHIP_VIRTUAL_BUFFER);
+    viewport.style.top = `${startIdx * SHIP_ROW_HEIGHT}px`;
+    let html = "";
+    for (let i = startIdx; i < endIdx; i++) {
+      html += _shipRowHtml(_vsFilteredShips[i]);
+    }
+    viewport.innerHTML = html;
+    _bindShipListEvents(viewport);
+  }
+
+  // Remove old scroll listener, add new one
+  if (_vsScrollHandler) container.removeEventListener("scroll", _vsScrollHandler);
+  _vsScrollHandler = renderVisibleRows;
+  container.addEventListener("scroll", _vsScrollHandler, { passive: true });
+  renderVisibleRows();
+}
+
+function _shipRowHtml(ship) {
+  const cls = ship.classInfo;
+  const selected = selectedShipIds.has(ship.id) ? " selected" : "";
+  return `<div class="ship-row${selected}" data-ship-id="${escapeHtml(ship.id)}" title="${escapeHtml(cls.label)} · ${escapeHtml(ship.name)}">
+    <span class="ship-row-icon">${escapeHtml(cls.icon)}</span>
+    <span class="ship-row-name">${escapeHtml(ship.name)}</span>
+    <span class="ship-row-faction">${escapeHtml(ship.faction || "无所属")}</span>
+    <span class="ship-row-location">${escapeHtml(describeShipLocation(ship))}</span>
+    <button class="ship-row-camera" data-camera-ship-id="${escapeHtml(ship.id)}" type="button" title="定位并跟随">⌕</button>
+  </div>`;
+}
+
+function _bindShipListEvents(container) {
+  container.querySelectorAll(".ship-row").forEach((row) => {
+    row.addEventListener("click", (event) => {
+      if (event.target.closest(".ship-row-camera")) return;
+      const ship = findShip(row.dataset.shipId);
+      if (!ship) return;
+      if (shipBulkMode || event.shiftKey || event.ctrlKey) {
+        const ids = new Set(selectedShipIds);
+        if (ids.has(ship.id)) ids.delete(ship.id);
+        else ids.add(ship.id);
+        setSelectedShips(Array.from(ids), { primaryId: ship.id });
+      } else {
+        selectShip(ship);
+      }
+    });
+    row.addEventListener("dblclick", () => {
+      const ship = findShip(row.dataset.shipId);
+      if (ship) zoomToShip(ship);
+    });
+  });
+  container.querySelectorAll(".ship-row-camera").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const ship = findShip(btn.dataset.cameraShipId);
+      if (!ship) return;
+      followShipId = ship.id;
+      zoomToShip(ship);
+    });
+  });
+}
+
 function updateFleetPanel() {
   normalizeFleets();
   refreshNavObjectDatalist();
@@ -5162,45 +5269,7 @@ function updateFleetPanel() {
   if (moveBtn) moveBtn.disabled = selectedShipIds.size === 0;
 
   if (shipList) {
-    shipList.innerHTML = filteredShips.length ? filteredShips.map((ship) => {
-      const cls = ship.classInfo;
-      const selected = selectedShipIds.has(ship.id) ? " selected" : "";
-      return `<div class="ship-row${selected}" data-ship-id="${escapeHtml(ship.id)}" title="${escapeHtml(cls.label)} · ${escapeHtml(ship.name)}">
-        <span class="ship-row-icon">${escapeHtml(cls.icon)}</span>
-        <span class="ship-row-name">${escapeHtml(ship.name)}</span>
-        <span class="ship-row-faction">${escapeHtml(ship.faction || "无所属")}</span>
-        <span class="ship-row-location">${escapeHtml(describeShipLocation(ship))}</span>
-        <button class="ship-row-camera" data-camera-ship-id="${escapeHtml(ship.id)}" type="button" title="定位并跟随">⌕</button>
-      </div>`;
-    }).join("") : `<div style="color:var(--muted);font-size:12px;padding:4px 0;">暂无舰船</div>`;
-    shipList.querySelectorAll(".ship-row").forEach((row) => {
-      row.addEventListener("click", (event) => {
-        if (event.target.closest(".ship-row-camera")) return;
-        const ship = findShip(row.dataset.shipId);
-        if (!ship) return;
-        if (shipBulkMode || event.shiftKey || event.ctrlKey) {
-          const ids = new Set(selectedShipIds);
-          if (ids.has(ship.id)) ids.delete(ship.id);
-          else ids.add(ship.id);
-          setSelectedShips(Array.from(ids), { primaryId: ship.id });
-        } else {
-          selectShip(ship);
-        }
-      });
-      row.addEventListener("dblclick", () => {
-        const ship = findShip(row.dataset.shipId);
-        if (ship) zoomToShip(ship);
-      });
-    });
-    shipList.querySelectorAll(".ship-row-camera").forEach((btn) => {
-      btn.addEventListener("click", (event) => {
-        event.stopPropagation();
-        const ship = findShip(btn.dataset.cameraShipId);
-        if (!ship) return;
-        followShipId = ship.id;
-        zoomToShip(ship);
-      });
-    });
+    renderVirtualShipList(shipList, filteredShips);
   }
 
   // Fleet bulk panel
