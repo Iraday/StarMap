@@ -789,7 +789,8 @@ function updateVisibility() {
         star.mesh.scale.setScalar(0.06);
         star.mesh.material.opacity = 0.5;
         star.mesh.material.transparent = true;
-        star.halo.visible = false;
+        star.halo.visible = visible && inSky;
+        star.halo.material.opacity = 0.05; // faint background halos
         if (star.controlSphere) star.controlSphere.visible = false;
         if (star.label) {
           star.label.visible = visible && inSky && showLabels.checked;
@@ -799,6 +800,7 @@ function updateVisibility() {
     } else {
       star.mesh.material.opacity = mutedByHighlight ? 0.18 : (star.objectType === "diffuse_cloud" ? 0.22 : 1);
       star.mesh.material.transparent = mutedByHighlight || star.objectType === "diffuse_cloud";
+      star.halo.visible = true;
       star.halo.material.opacity = highlight ? 0.55 : star.status === "outer" ? 0.16 : 0.28;
       if (star.controlSphere) star.controlSphere.material.opacity = highlight ? 0.075 : 0.04;
     }
@@ -827,7 +829,7 @@ function updateScale() {
   });
 }
 
-function showDetails(star) {
+function showDetails(star, bodies = null) {
   selectedStar = star;
   selectedBody = null;
   const rows = [
@@ -848,6 +850,21 @@ function showDetails(star) {
     detailRow("设定", "2350设定", formatMarkdown(star.setting))
   ];
   if (star.notes) rows.push(detailRow("势力", "势力备注", formatMarkdown(star.notes)));
+  
+  if (bodies) {
+    const esiArray = [];
+    bodies.forEach(body => {
+      const habScore = getHabitabilityScore(body);
+      if (habScore > 0) {
+        esiArray.push(`${body.name} (${habScore.toFixed(2)})`);
+      }
+    });
+    if (esiArray.length > 0) {
+      rows.push(detailRow("天文", "宜居星球 (ESI)", esiArray.join("<br>")));
+    }
+  }
+
+  setDetailNavActive(null);
   if (star.age) rows.push(detailRow("天文", "恒星年龄", formatMarkdown(star.age)));
   if (star.lifespan) rows.push(detailRow("天文", "恒星寿命", formatMarkdown(star.lifespan)));
   if (star.disasters) rows.push(detailRow("天文", "灾害特征", formatMarkdown(star.disasters)));
@@ -859,15 +876,19 @@ function showDetails(star) {
 function showBodyDetails(body, star) {
   selectedStar = star;
   selectedBody = body;
+  const habScore = getHabitabilityScore(body);
   const rows = [
     detailRow("概览", "所属恒星系", formatMarkdown(star.name)),
     detailRow("概览", "天体类型", body.bodyType),
     detailRow("轨道", "轨道", `${Number(body.orbitAu).toFixed(3)} AU`),
     detailRow("物理", "尺度", body.radiusLabel || "-"),
     detailRow("物理", "质量", body.massLabel || "-"),
-    detailRow("物理", "宜居", body.habitable ? "是/准宜居" : "否"),
-    detailRow("说明", "说明", formatMarkdown(body.summary || "-"))
+    detailRow("物理", "宜居", body.habitable ? "是/准宜居" : "否")
   ];
+  if (habScore > 0) {
+    rows.push(detailRow("现实", "地球相似指数 (ESI)", habScore.toFixed(2)));
+  }
+  rows.push(detailRow("说明", "说明", formatMarkdown(body.summary || "-")));
   if (body.bodyType === "star" && star.hz_inner && star.hz_outer) {
     rows.push(detailRow("轨道", "恒星宜居带", `${Number(star.hz_inner).toFixed(3)}-${Number(star.hz_outer).toFixed(3)} AU`));
   }
@@ -980,6 +1001,14 @@ function clearSystemView() {
 
 function exitSystemView() {
   if (!inSystemView) return;
+  stars.forEach((s) => {
+    if (s.savedLabelSprite) {
+      labelLayer.remove(s.label);
+      s.label = s.savedLabelSprite;
+      labelLayer.add(s.label);
+      s.savedLabelSprite = null;
+    }
+  });
   clearSystemView();
   if (savedCameraPos && savedCameraTarget) {
     camera.position.copy(savedCameraPos);
@@ -1055,7 +1084,8 @@ function classifyPlanet(body) {
   if (name.includes("mars") || name.includes("火星") || summary.includes("稀薄") || summary.includes("干燥")) return "mars";
   if (name.includes("mercury") || name.includes("水星") || summary.includes("铁核") || summary.includes("无大气")) return "mercury";
 
-  if (body.habitable || summary.includes("宜居") || summary.includes("液态水") || summary.includes("生态")) return "earth";
+  if (summary.includes("地球化") || summary.includes("改造")) return "terraforming";
+  if (body.habitable || summary.includes("宜居") || summary.includes("液态水") || summary.includes("生态")) return "earth_like";
   if (summary.includes("冰") || summary.includes("冷") || summary.includes("冻")) return "ice";
 
   return "rocky";
@@ -1093,7 +1123,8 @@ function bodyColorRich(body) {
     venus: 0xe8c060,
     mars: 0xc86030,
     mercury: 0x988888,
-    earth: 0x4898d0,
+    earth_like: 0x4898d0,
+    terraforming: 0x8b6b4a,
     ice: 0xa8c8e0,
     rocky: 0xb0a898
   }[pc] ?? 0xcbd5e1;
@@ -1117,7 +1148,7 @@ function bodyRadiusRich(body) {
     return 0.11;
   }
   const pc = classifyPlanet(body);
-  const mins = { gas_giant: 0.26, ice_giant: 0.22, mini_neptune: 0.19, lava: 0.13, venus: 0.16, mars: 0.14, mercury: 0.12, earth: 0.17, ice: 0.14, rocky: 0.14 };
+  const mins = { gas_giant: 0.26, ice_giant: 0.22, mini_neptune: 0.19, lava: 0.13, venus: 0.16, mars: 0.14, mercury: 0.12, earth_like: 0.17, terraforming: 0.16, ice: 0.14, rocky: 0.14 };
   const base = mins[pc] ?? 0.15;
   if (re !== null) {
     if (pc === "gas_giant") return base + Math.min(re / 15, 1) * 0.16;
@@ -1165,6 +1196,90 @@ function hasCuratedSystemDetails(star, bodies = []) {
     if (id.startsWith(`${star.id}-planet-`) && String(body.summary || "").includes("自动生成")) return false;
     return true;
   });
+}
+
+function getHabitabilityScore(body) {
+  if (body.id === "earth" || body.name === "地球") return 1.0;
+  
+  const pc = body.bodyType === "moon" ? classifyMoon(body) : classifyPlanet(body);
+  const isHab = body.habitable || pc === "earth_like" || pc === "terraforming";
+  if (!isHab) return 0.0;
+  
+  let hash = 0;
+  const str = String(body.id || body.name);
+  for (let i = 0; i < str.length; i++) {
+    hash = Math.imul(31, hash) + str.charCodeAt(i) | 0;
+  }
+  const rand = Math.abs(hash) / 2147483647;
+  
+  if (pc === "earth_like") return 0.85 + rand * 0.14; // 0.85 - 0.99
+  if (pc === "terraforming") return 0.60 + rand * 0.24; // 0.60 - 0.84
+  return 0.30 + rand * 0.29; // 0.30 - 0.59
+}
+
+function createBodyTexture(type, hexColor) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext("2d");
+  
+  const baseColor = new THREE.Color(hexColor);
+  
+  // Fake 3D spherical shadow
+  const gradient = ctx.createRadialGradient(100, 100, 0, 128, 128, 128);
+  gradient.addColorStop(0, "rgba(255,255,255,0.1)");
+  gradient.addColorStop(0.6, "rgba(0,0,0,0)");
+  gradient.addColorStop(1, "rgba(0,0,0,0.7)");
+
+  ctx.fillStyle = "#" + baseColor.getHexString();
+  ctx.fillRect(0, 0, 256, 256);
+
+  // Add noise/stripes
+  ctx.globalAlpha = 0.4;
+  for (let i = 0; i < 8000; i++) {
+    const x = Math.random() * 256;
+    const y = Math.random() * 256;
+    const size = Math.random() * 2 + 1;
+    if (type === "gas_giant" || type === "mini_neptune") {
+      ctx.fillStyle = Math.random() > 0.5 ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.2)";
+      ctx.fillRect(0, y, 256, size * 2);
+    } else {
+      ctx.fillStyle = Math.random() > 0.5 ? "#ffffff" : "#000000";
+      ctx.fillRect(x, y, size, size);
+    }
+  }
+
+  // Earth-like / Terraforming continents & clouds
+  if (type === "earth_like" || type === "terraforming") {
+    ctx.globalAlpha = type === "terraforming" ? 0.35 : 0.6;
+    ctx.fillStyle = "#228b22"; // green patches
+    for (let i = 0; i < 20; i++) {
+      ctx.beginPath();
+      ctx.arc(Math.random() * 256, Math.random() * 256, Math.random() * 30 + 10, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = type === "terraforming" ? 0.4 : 0.8;
+    ctx.fillStyle = "#ffffff"; // clouds
+    for (let i = 0; i < 40; i++) {
+      ctx.beginPath();
+      ctx.ellipse(Math.random() * 256, Math.random() * 256, Math.random() * 20 + 5, Math.random() * 8 + 2, Math.random() * Math.PI, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else if (type === "lava") {
+    ctx.globalAlpha = 0.8;
+    ctx.fillStyle = "#ffaa00"; // cracks
+    for (let i = 0; i < 15; i++) {
+      ctx.fillRect(Math.random() * 256, Math.random() * 256, Math.random() * 40, 2);
+    }
+  }
+
+  // Apply shadow
+  ctx.globalAlpha = 1.0;
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 256, 256);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  return texture;
 }
 
 async function openSystemView(value = selectedStar?.id) {
@@ -1219,6 +1334,19 @@ async function openSystemView(value = selectedStar?.id) {
   if (star.label) star.label.visible = false;
   if (star.controlSphere) star.controlSphere.visible = false;
 
+  // Background stars labels
+  stars.forEach((s) => {
+    if (s.id !== star.id && s.label) {
+      s.savedLabelSprite = s.label;
+      labelLayer.remove(s.label);
+      const newLabel = makeTextSprite(s.short + " (系外)", "#9eaebe", 22);
+      newLabel.position.copy(s.mesh.position).add(new THREE.Vector3(0, getStarRadius(s) * 0.8 + 0.15, 0));
+      newLabel.userData.starLabel = true;
+      s.label = newLabel;
+      labelLayer.add(newLabel);
+    }
+  });
+
   const starRadius = getStarRadius(star) * Number(starScale.value);
   const maxOrbit = Math.max(1, ...payload.bodies.map((b, i) => scaledOrbit(b, i)));
   const systemScale = Math.min(0.15, (starRadius * 1.8) / maxOrbit);
@@ -1266,9 +1394,12 @@ async function openSystemView(value = selectedStar?.id) {
     const angle = index * 1.78 + (star.id.length % 7);
     const color = bodyColorRich(body);
     const radius = bodyRadiusRich(body);
+    const pc = body.bodyType === "planet" ? classifyPlanet(body) : (body.bodyType === "moon" ? classifyMoon(body) : body.bodyType);
+    const texture = createBodyTexture(pc, color);
+
     const mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(radius, 24, 16),
-      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: body.bodyType === "cloud" ? 0.45 : 1 })
+      new THREE.SphereGeometry(radius, 32, 24),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, map: texture, transparent: true, opacity: body.bodyType === "cloud" ? 0.45 : 1 })
     );
     mesh.position.set(Math.cos(angle) * orbitRadius, 0, Math.sin(angle) * orbitRadius);
     mesh.userData.body = body;
@@ -1318,7 +1449,9 @@ async function openSystemView(value = selectedStar?.id) {
     }
 
     const labelColor = body.bodyType === "star" ? "#" + new THREE.Color(color).getHexString() : "#edf3f8";
-    const label = makeTextSprite(body.name, labelColor, 19);
+    const habScore = getHabitabilityScore(body);
+    const nameStr = habScore > 0 ? `${body.name} (ESI: ${habScore.toFixed(2)})` : body.name;
+    const label = makeTextSprite(nameStr, labelColor, 19);
     label.scale.multiplyScalar(labelInvScale);
     label.position.copy(mesh.position).add(new THREE.Vector3(0, radius + 0.34, 0));
     scaleRoot.add(label);
@@ -1335,9 +1468,11 @@ async function openSystemView(value = selectedStar?.id) {
       const orbit = makeOrbit(moonOrbitRadius, 0xd5dce8);
       orbit.position.copy(parentMesh.position);
       scaleRoot.add(orbit);
+      const mc = classifyMoon(moon);
+      const moonTex = createBodyTexture(mc, moonColor);
       const mesh = new THREE.Mesh(
-        new THREE.SphereGeometry(radius, 16, 12),
-        new THREE.MeshBasicMaterial({ color: moonColor })
+        new THREE.SphereGeometry(radius, 24, 16),
+        new THREE.MeshBasicMaterial({ color: 0xffffff, map: moonTex })
       );
       mesh.position.set(
         parentMesh.position.x + Math.cos(moonAngle) * moonOrbitRadius,
@@ -1349,7 +1484,9 @@ async function openSystemView(value = selectedStar?.id) {
       scaleRoot.add(mesh);
       bodyMeshes.push(mesh);
       bodyMeshById.set(moon.id, mesh);
-      const label = makeTextSprite(moon.name, "#d5dce8", 16);
+      const habScore = getHabitabilityScore(moon);
+      const nameStr = habScore > 0 ? `${moon.name} (ESI: ${habScore.toFixed(2)})` : moon.name;
+      const label = makeTextSprite(nameStr, "#d5dce8", 16);
       label.scale.multiplyScalar(labelInvScale);
       label.position.copy(mesh.position).add(new THREE.Vector3(0, radius + 0.25, 0));
       scaleRoot.add(label);
@@ -1361,9 +1498,11 @@ async function openSystemView(value = selectedStar?.id) {
         scaleRoot.add(orbit);
       }
       const angle = globalIdx * 1.78 + (star.id.length % 7);
+      const mc = classifyMoon(moon);
+      const moonTex = createBodyTexture(mc, moonColor);
       const mesh = new THREE.Mesh(
-        new THREE.SphereGeometry(radius, 16, 12),
-        new THREE.MeshBasicMaterial({ color: moonColor })
+        new THREE.SphereGeometry(radius, 24, 16),
+        new THREE.MeshBasicMaterial({ color: 0xffffff, map: moonTex })
       );
       mesh.position.set(Math.cos(angle) * orbitRadius, 0, Math.sin(angle) * orbitRadius);
       mesh.userData.body = moon;
@@ -1391,7 +1530,10 @@ async function openSystemView(value = selectedStar?.id) {
     s.mesh.scale.setScalar(0.06);
     s.mesh.material.opacity = 0.5;
     s.mesh.material.transparent = true;
-    if (s.halo) s.halo.visible = false;
+    if (s.halo) {
+      s.halo.visible = inSky;
+      s.halo.material.opacity = 0.05;
+    }
     if (s.controlSphere) s.controlSphere.visible = false;
     if (s.label) {
       s.label.visible = inSky && showLabels.checked;
@@ -1399,7 +1541,7 @@ async function openSystemView(value = selectedStar?.id) {
     }
   });
   territoryLayer.visible = false;
-  showDetails(star);
+  showDetails(star, payload.bodies);
   writeAgentOutput({ action: "openSystem", id: star.id, bodies: payload.bodies.length });
   return payload;
 }
