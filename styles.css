@@ -10,6 +10,10 @@
   --danger: #ff6f61;
   --axis-y: #e6d36a;
   --axis-z: #8fa8ff;
+  /* Solid (opaque) surfaces for floating windows & editors */
+  --panel-bg: #11161e;
+  --input-bg: #0a0f16;
+  --text-color: #edf3f8;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
@@ -2360,4 +2364,148 @@ button[aria-pressed="true"] {
 
 .big-edit-save:hover {
   filter: brightness(1.1);
+}
+
+/* ── Membership shuttle (dual-list of ships & fleets) ─────────────── */
+
+.be-shuttle {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.be-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.be-col-head {
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  border-bottom: 1px solid var(--panel-border);
+  background: rgba(114, 214, 201, 0.06);
+}
+
+.be-col-list {
+  flex: 1 1 auto;
+  min-height: 120px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.be-col-list.be-drop {
+  background: rgba(114, 214, 201, 0.12);
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+}
+
+.be-col-empty {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 8px;
+  text-align: center;
+}
+
+.be-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  font-size: 12px;
+  border-radius: 4px;
+  cursor: grab;
+  border: 1px solid transparent;
+  background: var(--input-bg, #0a0f16);
+}
+
+.be-item:hover {
+  border-color: rgba(114, 214, 201, 0.5);
+}
+
+.be-item.sel {
+  background: rgba(114, 214, 201, 0.22);
+  border-color: var(--accent);
+}
+
+.be-item.be-dragging {
+  opacity: 0.4;
+}
+
+.be-item-fleet {
+  background: rgba(140, 166, 200, 0.12);
+}
+
+.be-item-icon {
+  flex-shrink: 0;
+}
+
+.be-item-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.be-item-meta {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--muted);
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.be-shuttle-mid {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+}
+
+.be-move {
+  width: 38px;
+  height: 34px;
+  font-size: 18px;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  background: var(--input-bg, #0a0f16);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.be-move:hover {
+  border-color: var(--accent);
+  background: rgba(114, 214, 201, 0.12);
+}
+
+/* Make floating windows clearly solid (opacity fixes) */
+.fleet-manager-window,
+.fleet-ship-window {
+  background: var(--panel-bg) !important;
+}
+
+.fm-fleet-list .fleet-row:hover {
+  background: rgba(114, 214, 201, 0.14);
+}
+
+.fm-fleet-list .fleet-row.selected {
+  background: rgba(114, 214, 201, 0.22);
+}
+
+.ship-list .ship-row:hover {
+  background: rgba(114, 214, 201, 0.14);
 }

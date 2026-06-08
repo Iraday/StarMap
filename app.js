@@ -2396,9 +2396,11 @@ function describeShipLocation(ship) {
 
 function normalizeFleets() {
   const known = new Set(ships.map((ship) => ship.id));
-  fleets = fleets
-    .map((fleet) => ({ ...fleet, shipIds: (fleet.shipIds || []).filter((id) => known.has(id)) }))
-    .filter((fleet) => fleet.shipIds.length > 0);
+  // Mutate shipIds in place so external references (e.g. the edit modal) stay valid
+  for (const fleet of fleets) {
+    fleet.shipIds = (fleet.shipIds || []).filter((id) => known.has(id));
+  }
+  fleets = fleets.filter((fleet) => fleet.shipIds.length > 0);
 }
 
 function createFleet(shipIds, name = "", opts = {}) {
@@ -5708,11 +5710,16 @@ function openFleetManagerWindow() {
   // Close button
   win.querySelector("#fmClose").addEventListener("click", () => { win.style.display = "none"; });
 
-  // Single edit button — behaviour adapts to how many fleets are selected
+  // Single edit button — behaviour adapts to how many fleets are selected.
+  // With no fleet selected: open the "create new fleet" composer seeded with all ships.
   win.querySelector("#fmEditBtn").addEventListener("click", () => {
     let ids = Array.from(fmSelectedFleetIds).filter((id) => fleets.some((f) => f.id === id));
     if (!ids.length && selectedFleetId) ids = [selectedFleetId];
-    if (!ids.length) { writeAgentOutput("先选择一个或多个舰队。"); return; }
+    if (!ids.length) {
+      if (!ships.length) { writeAgentOutput("没有可用舰船。"); return; }
+      openBigEditModal({ type: "fleet", objects: [], mode: "new", seedShipIds: ships.map((s) => s.id) });
+      return;
+    }
     const objects = ids.map((id) => fleets.find((f) => f.id === id)).filter(Boolean);
     openBigEditModal({ type: "fleet", objects });
   });
@@ -5726,10 +5733,8 @@ function openFleetManagerWindow() {
     dropZone.classList.remove("drag-over");
     const shipId = e.dataTransfer.getData("text/ship-id");
     if (!shipId || !findShip(shipId)) return;
-    const name = prompt("新舰队名称：", `舰队-${nextFleetId}`);
-    if (name === null) return;
-    const fleet = createFleet([shipId], name.trim() || undefined);
-    if (fleet) { refreshFleetManager(); updateFleetPanel(); showFleetInfoPanel(fleet); }
+    // Open the create-new-fleet composer seeded with the dropped ship
+    openBigEditModal({ type: "fleet", objects: [], mode: "new", seedShipIds: [shipId] });
   });
 
   // Make draggable
@@ -5831,11 +5836,24 @@ function refreshFleetManager() {
 let bigEditContext = null;
 let modalEditActive = false;
 let preModalTimePaused = false;
+let membershipIncluded = new Set(); // ship ids currently composed into the fleet being built/edited
 
-function openBigEditModal({ type, objects }) {
-  if (!objects || !objects.length) return;
+function openBigEditModal({ type, objects, mode = "edit", seedShipIds = null }) {
+  objects = objects || [];
+  if (mode !== "new" && !objects.length) return;
   closeBigEditModal(false); // clear any prior
-  bigEditContext = { type, objects };
+  const bulk = objects.length > 1;
+  bigEditContext = { type, objects, mode, bulk };
+
+  // Initialise membership composer (fleet new / single edit)
+  membershipIncluded = new Set();
+  if (type === "fleet") {
+    if (mode === "new") {
+      (seedShipIds || []).forEach((id) => { if (findShip(id)) membershipIncluded.add(id); });
+    } else if (!bulk) {
+      objects[0].shipIds.forEach((id) => { if (findShip(id)) membershipIncluded.add(id); });
+    }
+  }
 
   // Freeze the world: pause time + disable orbit controls
   preModalTimePaused = timeFlowPaused;
@@ -5847,9 +5865,10 @@ function openBigEditModal({ type, objects }) {
   const overlay = document.createElement("div");
   overlay.id = "bigEditOverlay";
   overlay.className = "big-edit-overlay";
-  const bulk = objects.length > 1;
   const kind = type === "fleet" ? "舰队" : "舰船";
-  const title = bulk ? `批量编辑 ${objects.length} 个${kind}` : `编辑${kind}：${escapeHtml(objects[0].name)}`;
+  const title = mode === "new"
+    ? "创建新舰队"
+    : (bulk ? `批量编辑 ${objects.length} 个${kind}` : `编辑${kind}：${escapeHtml(objects[0].name)}`);
 
   overlay.innerHTML = `
     <div class="big-edit-window" role="dialog" aria-modal="true">
@@ -5857,29 +5876,27 @@ function openBigEditModal({ type, objects }) {
         <span class="big-edit-title">${title}</span>
         <button class="big-edit-close panel-hide" type="button" title="关闭">×</button>
       </div>
-      <div class="big-edit-body">${buildBigEditSections(type, objects, bulk)}</div>
+      <div class="big-edit-body">${buildBigEditSections(type, objects, bulk, mode)}</div>
       <div class="big-edit-footer">
         <span class="big-edit-status" data-edit-status>编辑期间时间已暂停</span>
         <span class="big-edit-footer-actions">
           <button class="big-edit-cancel" type="button">取消</button>
-          <button class="big-edit-save" type="button">保存</button>
+          <button class="big-edit-save" type="button">${mode === "new" ? "创建" : "保存"}</button>
         </span>
       </div>
     </div>
   `;
   document.querySelector("#app").appendChild(overlay);
 
-  // Clicking backdrop (outside window) does nothing (modal). Close via buttons.
   overlay.querySelector(".big-edit-close").addEventListener("click", () => closeBigEditModal(true));
   overlay.querySelector(".big-edit-cancel").addEventListener("click", () => closeBigEditModal(true));
   overlay.querySelector(".big-edit-save").addEventListener("click", () => { saveBigEdit(); });
 
-  // Faction combobox search-filtering for each faction section
   bindBigEditFactionSearch(overlay);
-  // Operation buttons (duplicate/split/delete/编队)
-  bindBigEditOperations(overlay, type, objects, bulk);
+  bindBigEditOperations(overlay, type, objects, bulk, mode);
+  // Membership composer (fleet new / single edit)
+  if (type === "fleet" && (mode === "new" || !bulk)) renderMembership(overlay);
 
-  // Escape closes (cancel)
   overlay._escHandler = (e) => { if (e.key === "Escape") { e.stopPropagation(); closeBigEditModal(true); } };
   document.addEventListener("keydown", overlay._escHandler, true);
 }
@@ -5901,12 +5918,14 @@ function closeBigEditModal(restore = true) {
   bigEditContext = null;
 }
 
-function buildBigEditSections(type, objects, bulk) {
+function buildBigEditSections(type, objects, bulk, mode) {
   const factions = collectAllFactions();
   const sections = [];
+  const isNew = mode === "new";
 
-  // Common representative values for prefill (single edit) or placeholders (bulk)
-  const factionVal = !bulk ? (type === "fleet" ? (objects[0].faction || deriveFleetFaction(objects[0])) : (objects[0].faction || "")) : "";
+  const factionVal = (!bulk && !isNew)
+    ? (type === "fleet" ? (objects[0].faction || deriveFleetFaction(objects[0])) : (objects[0].faction || ""))
+    : "";
   const speedRep = (() => {
     let s = null;
     const collectShips = type === "fleet"
@@ -5916,12 +5935,12 @@ function buildBigEditSections(type, objects, bulk) {
     return s;
   })();
 
-  if (!bulk && type === "fleet") {
-    const fleet = objects[0];
+  if (type === "fleet" && (isNew || !bulk)) {
+    const fleet = isNew ? null : objects[0];
     sections.push(section("基本信息", `
-      <label class="be-field"><span>舰队名</span><input data-edit="name" type="text" value="${escapeHtml(fleet.name)}" /></label>
-      <label class="be-field"><span>指挥官</span><input data-edit="leader" type="text" value="${escapeHtml(fleet.leader || "")}" /></label>
-      <label class="be-field"><span>成立日期</span><input data-edit="foundedDate" type="text" value="${escapeHtml(fleet.foundedDate || "")}" placeholder="如 AD 2345" /></label>
+      <label class="be-field"><span>舰队名</span><input data-edit="name" type="text" value="${escapeHtml(fleet?.name || "")}" placeholder="${isNew ? `舰队-${nextFleetId}` : ""}" /></label>
+      <label class="be-field"><span>指挥官</span><input data-edit="leader" type="text" value="${escapeHtml(fleet?.leader || "")}" /></label>
+      <label class="be-field"><span>成立日期</span><input data-edit="foundedDate" type="text" value="${escapeHtml(fleet?.foundedDate || "")}" placeholder="如 AD 2345" /></label>
     `));
   }
   if (!bulk && type === "ship") {
@@ -5931,10 +5950,16 @@ function buildBigEditSections(type, objects, bulk) {
     `));
   }
 
-  // 势力 section — searchable + selectable
+  // 舰船编成 composer (fleet new / single edit)
+  if (type === "fleet" && (isNew || !bulk)) {
+    sections.push(section("舰船编成", `<div class="be-membership" data-membership></div>`,
+      "左为已编入，右为可选。点击多选，← → 移动，或拖拽。可整支舰队编入以合并；同一舰船可属于多支舰队。"));
+  }
+
+  // 势力 section
   sections.push(section("势力", `
     <div class="be-faction">
-      <input class="be-faction-input" data-edit="faction" type="text" value="${escapeHtml(factionVal)}" placeholder="${bulk ? "留空则不更改" : "输入或从下方选择"}" />
+      <input class="be-faction-input" data-edit="faction" type="text" value="${escapeHtml(factionVal)}" placeholder="${(bulk || isNew) ? (isNew ? "可留空" : "留空则不更改") : "输入或从下方选择"}" />
       <div class="be-faction-list">
         ${factions.map((f) => `<button type="button" class="be-faction-opt" data-faction="${escapeHtml(f)}"><span class="be-faction-swatch" style="background:${factionColors[f] || "#8ca6c8"}"></span>${escapeHtml(f)}</button>`).join("")}
       </div>
@@ -5943,27 +5968,14 @@ function buildBigEditSections(type, objects, bulk) {
 
   // 速度 section
   sections.push(section("速度", `
-    <label class="be-field"><span>航速</span><input data-edit="speed" type="text" value="${!bulk && speedRep != null ? escapeHtml(formatSpeedPlain(speedRep)) : ""}" placeholder="${bulk ? "留空则不更改，如 0.4c / 1ly/sec" : "如 0.4c / 1ly/sec"}" /></label>
+    <label class="be-field"><span>航速</span><input data-edit="speed" type="text" value="${(!bulk && !isNew && speedRep != null) ? escapeHtml(formatSpeedPlain(speedRep)) : ""}" placeholder="${(bulk || isNew) ? "留空则不更改，如 0.4c / 1ly/sec" : "如 0.4c / 1ly/sec"}" /></label>
   `, "应用到选中对象的所有舰船。"));
 
-  if (!bulk && type === "fleet") {
-    const fleet = objects[0];
+  if (type === "fleet" && (isNew || !bulk)) {
+    const fleet = isNew ? null : objects[0];
     sections.push(section("历史 / 备注 (Markdown)", `
-      <textarea class="be-md" data-edit="history" rows="6" placeholder="# 舰队沿革&#10;成立背景、重大战役、领导更替……">${escapeHtml(fleet.history || "")}</textarea>
+      <textarea class="be-md" data-edit="history" rows="6" placeholder="# 舰队沿革&#10;成立背景、重大战役、领导更替……">${escapeHtml(fleet?.history || "")}</textarea>
     `));
-    // Member ship list with checkboxes for split/remove
-    const memberRows = fleet.shipIds.map((id) => {
-      const s = findShip(id);
-      if (!s) return "";
-      return `<label class="be-member"><input type="checkbox" class="be-member-check" value="${escapeHtml(id)}" /><span>${escapeHtml(s.classInfo.icon)} ${escapeHtml(s.name)}</span><span class="be-member-meta">${escapeHtml(s.faction || "无所属")} · ${escapeHtml(describeShipLocation(s))}</span></label>`;
-    }).join("");
-    sections.push(section("成员舰船", `
-      <div class="be-member-list">${memberRows || '<div style="color:var(--muted)">空舰队</div>'}</div>
-      <div class="be-ops">
-        <button type="button" class="be-op" data-op="split">分拆选中为新舰队</button>
-        <button type="button" class="be-op" data-op="remove">移除选中舰船</button>
-      </div>
-    `, "勾选舰船后可分拆或移除。"));
   }
   if (!bulk && type === "ship") {
     const ship = objects[0];
@@ -5974,11 +5986,14 @@ function buildBigEditSections(type, objects, bulk) {
 
   // Operations section
   if (type === "fleet") {
-    const ops = bulk
-      ? `<button type="button" class="be-op be-danger" data-op="delete">删除选中舰队</button>`
-      : `<button type="button" class="be-op" data-op="duplicate">复制全部舰船为新舰队</button>
-         <button type="button" class="be-op be-danger" data-op="delete">删除舰队</button>`;
-    sections.push(section("操作", `<div class="be-ops">${ops}</div>`, "舰船本身不会被删除。"));
+    let ops;
+    if (isNew) ops = "";
+    else if (bulk) ops = `<button type="button" class="be-op" data-op="merge">合并为一个舰队</button>
+                          <button type="button" class="be-op be-danger" data-op="delete">删除选中舰队</button>`;
+    else ops = `<button type="button" class="be-op" data-op="duplicate">复制全部舰船为新舰队</button>
+                <button type="button" class="be-op" data-op="splitSelected">分拆已编入选中为新舰队</button>
+                <button type="button" class="be-op be-danger" data-op="delete">删除舰队</button>`;
+    if (ops) sections.push(section("操作", `<div class="be-ops">${ops}</div>`, "舰船本身不会被删除。"));
   } else {
     const ops = bulk
       ? `<button type="button" class="be-op" data-op="makefleet">编成舰队</button>
@@ -5998,6 +6013,127 @@ function buildBigEditSections(type, objects, bulk) {
   }
 }
 
+// ── Membership composer (dual-list shuttle of ships & fleets) ───────
+
+function renderMembership(overlay) {
+  const host = overlay.querySelector("[data-membership]");
+  if (!host) return;
+  const editedFleetId = (bigEditContext?.mode === "edit" && bigEditContext.objects[0]) ? bigEditContext.objects[0].id : null;
+
+  const includedShips = Array.from(membershipIncluded).map(findShip).filter(Boolean);
+  // Available = other fleets (group items) + ships not currently included
+  const otherFleets = fleets.filter((f) => f.id !== editedFleetId);
+  const availableShips = ships.filter((s) => !membershipIncluded.has(s.id));
+
+  const shipItem = (s, side) => `<div class="be-item" data-kind="ship" data-id="${escapeHtml(s.id)}" data-side="${side}" draggable="true" title="${escapeHtml(s.classInfo.label)}">
+      <span class="be-item-icon">${escapeHtml(s.classInfo.icon)}</span>
+      <span class="be-item-name">${escapeHtml(s.name)}</span>
+      <span class="be-item-meta">${escapeHtml(s.faction || "无所属")}</span>
+    </div>`;
+  const fleetItem = (f) => `<div class="be-item be-item-fleet" data-kind="fleet" data-id="${escapeHtml(f.id)}" data-side="available" draggable="true" title="整支舰队（${f.shipIds.length}艘）">
+      <span class="be-item-icon">▥</span>
+      <span class="be-item-name">${escapeHtml(f.name)}</span>
+      <span class="be-item-meta">${f.shipIds.length}艘 · ${escapeHtml(deriveFleetFaction(f))}</span>
+    </div>`;
+
+  host.innerHTML = `
+    <div class="be-shuttle">
+      <div class="be-col" data-col="included">
+        <div class="be-col-head">已编入 (${includedShips.length})</div>
+        <div class="be-col-list" data-list="included">
+          ${includedShips.map((s) => shipItem(s, "included")).join("") || '<div class="be-col-empty">空</div>'}
+        </div>
+      </div>
+      <div class="be-shuttle-mid">
+        <button type="button" class="be-move" data-move="include" title="编入选中">←</button>
+        <button type="button" class="be-move" data-move="exclude" title="移出选中">→</button>
+      </div>
+      <div class="be-col" data-col="available">
+        <div class="be-col-head">可选 (${availableShips.length}舰船 · ${otherFleets.length}舰队)</div>
+        <div class="be-col-list" data-list="available">
+          ${otherFleets.map(fleetItem).join("")}
+          ${availableShips.map((s) => shipItem(s, "available")).join("") || (otherFleets.length ? "" : '<div class="be-col-empty">空</div>')}
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Selection (click toggles) within each list
+  host.querySelectorAll(".be-item").forEach((item) => {
+    item.addEventListener("click", (e) => {
+      if (!(e.ctrlKey || e.metaKey || e.shiftKey)) {
+        // single-select within its own list
+        const list = item.closest(".be-col-list");
+        list.querySelectorAll(".be-item.sel").forEach((x) => x.classList.remove("sel"));
+      }
+      item.classList.toggle("sel");
+    });
+    item.addEventListener("dblclick", () => {
+      // double-click moves it across
+      if (item.dataset.side === "available") includeItems([item]);
+      else excludeItems([item]);
+    });
+    item.addEventListener("dragstart", (e) => {
+      const list = item.closest(".be-col-list");
+      let group = Array.from(list.querySelectorAll(".be-item.sel"));
+      if (!group.includes(item)) group = [item];
+      const payload = group.map((g) => ({ kind: g.dataset.kind, id: g.dataset.id }));
+      e.dataTransfer.setData("application/be-items", JSON.stringify(payload));
+      e.dataTransfer.effectAllowed = "move";
+      item.classList.add("be-dragging");
+    });
+    item.addEventListener("dragend", () => item.classList.remove("be-dragging"));
+  });
+
+  // Drop zones: included list (include) / available list (exclude)
+  host.querySelectorAll(".be-col-list").forEach((list) => {
+    list.addEventListener("dragover", (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; list.classList.add("be-drop"); });
+    list.addEventListener("dragleave", () => list.classList.remove("be-drop"));
+    list.addEventListener("drop", (e) => {
+      e.preventDefault();
+      list.classList.remove("be-drop");
+      let payload = [];
+      try { payload = JSON.parse(e.dataTransfer.getData("application/be-items") || "[]"); } catch (_) {}
+      // Cross-window ship drag (from ship list / fleet windows)
+      if (!payload.length) {
+        const sid = e.dataTransfer.getData("text/ship-id");
+        if (sid) payload = [{ kind: "ship", id: sid }];
+      }
+      if (!payload.length) return;
+      const target = list.dataset.list;
+      if (target === "included") includeByPayload(payload);
+      else excludeByPayload(payload);
+    });
+  });
+
+  // Move buttons
+  host.querySelector('[data-move="include"]').addEventListener("click", () => {
+    includeItems(Array.from(host.querySelectorAll('[data-list="available"] .be-item.sel')));
+  });
+  host.querySelector('[data-move="exclude"]').addEventListener("click", () => {
+    excludeItems(Array.from(host.querySelectorAll('[data-list="included"] .be-item.sel')));
+  });
+
+  function includeItems(items) { includeByPayload(items.map((i) => ({ kind: i.dataset.kind, id: i.dataset.id }))); }
+  function excludeItems(items) { excludeByPayload(items.map((i) => ({ kind: i.dataset.kind, id: i.dataset.id }))); }
+  function includeByPayload(payload) {
+    let n = 0;
+    payload.forEach((p) => {
+      if (p.kind === "ship") { if (findShip(p.id) && !membershipIncluded.has(p.id)) { membershipIncluded.add(p.id); n++; } }
+      else if (p.kind === "fleet") { const f = fleets.find((x) => x.id === p.id); if (f) f.shipIds.forEach((sid) => { if (findShip(sid) && !membershipIncluded.has(sid)) { membershipIncluded.add(sid); n++; } }); }
+    });
+    if (n) renderMembership(overlay);
+  }
+  function excludeByPayload(payload) {
+    let n = 0;
+    payload.forEach((p) => {
+      if (p.kind === "ship") { if (membershipIncluded.delete(p.id)) n++; }
+      else if (p.kind === "fleet") { const f = fleets.find((x) => x.id === p.id); if (f) f.shipIds.forEach((sid) => { if (membershipIncluded.delete(sid)) n++; }); }
+    });
+    if (n) renderMembership(overlay);
+  }
+}
+
 function bindBigEditFactionSearch(overlay) {
   overlay.querySelectorAll(".be-faction").forEach((wrap) => {
     const input = wrap.querySelector(".be-faction-input");
@@ -6013,7 +6149,7 @@ function bindBigEditFactionSearch(overlay) {
   });
 }
 
-function bindBigEditOperations(overlay, type, objects, bulk) {
+function bindBigEditOperations(overlay, type, objects, bulk, mode) {
   overlay.querySelectorAll(".be-op").forEach((btn) => {
     btn.addEventListener("click", () => {
       const op = btn.dataset.op;
@@ -6030,17 +6166,30 @@ function bindBigEditOperations(overlay, type, objects, bulk) {
           const newIds = [];
           fleet.shipIds.forEach((sid) => { const src = findShip(sid); if (!src) return; const copy = createShip({ ...src, name: src.name + " (副本)", instant: true }); if (copy) newIds.push(copy.id); });
           if (newIds.length) { createFleet(newIds, fleet.name + " (副本)"); updateShipMeshes(); afterBigEditMutation(); writeAgentOutput(`已复制 ${newIds.length} 艘舰船为新舰队。`); }
-        } else if (op === "split" || op === "remove") {
-          const checks = Array.from(overlay.querySelectorAll(".be-member-check:checked")).map((c) => c.value);
-          if (!checks.length) { setBigEditStatus("先勾选舰船。", true); return; }
-          fleet.shipIds = fleet.shipIds.filter((id) => !checks.includes(id));
-          if (op === "split") { const nf = createFleet(checks, `${fleet.name}-分队`); writeAgentOutput(`已分拆 ${checks.length} 艘到 "${nf?.name}"。`); }
-          normalizeFleets(); afterBigEditMutation();
-          // Re-render member list section by reopening modal in single mode
-          openBigEditModal({ type: "fleet", objects: [fleet] });
+        } else if (op === "splitSelected") {
+          // Split the currently-selected INCLUDED ships out into a new fleet
+          const sel = Array.from(overlay.querySelectorAll('[data-list="included"] .be-item.sel')).map((i) => i.dataset.id).filter((id) => membershipIncluded.has(id));
+          if (!sel.length) { setBigEditStatus("先在“已编入”列表选择要分拆的舰船。", true); return; }
+          sel.forEach((id) => membershipIncluded.delete(id));
+          const nf = createFleet(sel, `${fleet.name}-分队`);
+          renderMembership(overlay);
+          afterBigEditMutation();
+          setBigEditStatus(`已分拆 ${sel.length} 艘到 "${nf?.name}"。`);
+        } else if (op === "merge") {
+          // Merge all selected fleets into the first; delete the rest
+          if (objects.length < 2) { setBigEditStatus("至少选择两支舰队才能合并。", true); return; }
+          const target = objects[0];
+          const merged = new Set(target.shipIds);
+          for (let i = 1; i < objects.length; i++) objects[i].shipIds.forEach((id) => merged.add(id));
+          target.shipIds = Array.from(merged);
+          const removeIds = objects.slice(1).map((f) => f.id);
+          fleets = fleets.filter((f) => !removeIds.includes(f.id));
+          fmSelectedFleetIds.clear(); fmSelectedFleetIds.add(target.id);
+          selectedFleetId = target.id;
+          normalizeFleets(); afterBigEditMutation(); closeBigEditModal(true);
+          writeAgentOutput(`已合并 ${objects.length} 支舰队为 "${target.name}"（${target.shipIds.length}艘）。`);
         }
       } else {
-        // ship ops
         if (op === "deleteShips") {
           if (!confirm(`删除选中的 ${objects.length} 艘舰船？`)) return;
           objects.forEach((s) => removeShip(s.id));
@@ -6070,8 +6219,9 @@ function saveBigEdit() {
   if (!bigEditContext) return;
   const overlay = document.querySelector("#bigEditOverlay");
   if (!overlay) return;
-  const { type, objects } = bigEditContext;
+  const { type, objects, mode } = bigEditContext;
   const bulk = objects.length > 1;
+  const isNew = mode === "new";
   const get = (key) => overlay.querySelector(`[data-edit="${key}"]`);
   const faction = get("faction") ? get("faction").value.trim() : null;
   const speedRaw = get("speed") ? get("speed").value.trim() : "";
@@ -6079,12 +6229,33 @@ function saveBigEdit() {
   if (speedRaw) { speed = parseShipSpeedSpec(speedRaw, null); if (!(speed > 0)) { setBigEditStatus("速度格式无效。", true); return; } }
 
   if (type === "fleet") {
-    objects.forEach((fleet) => {
+    if (isNew) {
+      const includedIds = Array.from(membershipIncluded);
+      if (!includedIds.length) { setBigEditStatus("请至少编入一艘舰船。", true); return; }
+      const nameV = get("name")?.value.trim();
+      const fleet = createFleet(includedIds, nameV || undefined, {
+        faction: faction || "",
+        leader: get("leader")?.value.trim() || "",
+        foundedDate: get("foundedDate")?.value.trim() || "",
+        history: get("history")?.value || "",
+      });
+      if (faction) includedIds.forEach((sid) => { const s = findShip(sid); if (s) s.faction = faction; });
+      if (speed != null) includedIds.forEach((sid) => { const s = findShip(sid); if (s) s.travelSpeed = speed; });
+      afterBigEditMutation();
+      if (fleet) showFleetInfoPanel(fleet);
+      setBigEditStatus("已创建");
+      closeBigEditModal(true);
+      return;
+    }
+    objects.forEach((obj) => {
+      const fleet = fleets.find((f) => f.id === obj.id) || obj; // re-find live object (refs can go stale)
       if (!bulk) {
         const nameV = get("name")?.value.trim(); if (nameV) fleet.name = nameV;
         if (get("leader")) fleet.leader = get("leader").value.trim();
         if (get("foundedDate")) fleet.foundedDate = get("foundedDate").value.trim();
         if (get("history")) fleet.history = get("history").value;
+        // Apply membership composer result (add/remove); multi-membership preserved (other fleets untouched)
+        fleet.shipIds = Array.from(membershipIncluded);
       }
       if (faction) { fleet.faction = faction; fleet.shipIds.forEach((sid) => { const s = findShip(sid); if (s) s.faction = faction; }); }
       if (speed != null) fleet.shipIds.forEach((sid) => { const s = findShip(sid); if (s) s.travelSpeed = speed; });
@@ -6096,6 +6267,7 @@ function saveBigEdit() {
       if (speed != null) ship.travelSpeed = speed;
     });
   }
+  normalizeFleets();
   afterBigEditMutation();
   if (type === "ship" && !bulk) { if (selectedShipId === objects[0].id) updateShipInfoPanel(objects[0]); }
   setBigEditStatus("已保存");
