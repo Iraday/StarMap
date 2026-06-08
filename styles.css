@@ -236,11 +236,11 @@ input {
 .detail-head {
   display: flex;
   align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
+  gap: 6px;
 }
 
 .detail-head-text {
+  flex: 1 1 0;
   min-width: 0;
 }
 
@@ -727,6 +727,12 @@ button[aria-pressed="true"] {
   line-height: 1;
 }
 
+/* Right panel toggle is inside the flex header, not absolute */
+.panel-toggle-right {
+  position: static;
+  flex-shrink: 0;
+}
+
 .panel-toggle:hover {
   border-color: rgba(114, 214, 201, 0.7);
   color: var(--text);
@@ -754,7 +760,11 @@ button[aria-pressed="true"] {
   padding: 8px;
 }
 
-.panel-right.collapsed > *:not(.panel-toggle) {
+.panel-right.collapsed > *:not(.panel-toggle):not(.detail-head) {
+  display: none;
+}
+
+.panel-right.collapsed .detail-head > *:not(.panel-toggle) {
   display: none;
 }
 
@@ -962,7 +972,11 @@ button[aria-pressed="true"] {
   transition: opacity 0.2s;
 }
 
-.fleet-panel.collapsed .fleet-panel-inner {
+.fleet-panel.collapsed .fleet-panel-inner > *:not(.fleet-panel-header) {
+  display: none;
+}
+
+.fleet-panel.collapsed .fleet-panel-tools > *:not(.fleet-panel-toggle) {
   display: none;
 }
 
@@ -972,20 +986,8 @@ button[aria-pressed="true"] {
 }
 
 .fleet-panel-toggle {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  z-index: 2;
-  min-height: 24px;
-  min-width: 24px;
-  padding: 0 5px;
-  border: 1px solid var(--panel-border);
-  border-radius: 4px;
-  background: rgba(237, 243, 248, 0.08);
-  color: var(--muted);
-  cursor: pointer;
-  font-size: 13px;
-  line-height: 1;
+  /* now inside flex header, no absolute positioning */
+  flex-shrink: 0;
 }
 
 .fleet-panel.collapsed .fleet-panel-toggle {
@@ -1578,13 +1580,18 @@ button[aria-pressed="true"] {
 .icon-button {
   display: grid;
   place-items: center;
-  min-width: 24px;
-  height: 24px;
+  min-width: 22px;
+  width: 22px;
+  height: 22px;
+  min-height: 22px;
   border: 1px solid var(--panel-border);
-  border-radius: 5px;
+  border-radius: 4px;
   background: rgba(237, 243, 248, 0.06);
   color: var(--muted);
   cursor: pointer;
+  padding: 0;
+  font-size: 13px;
+  flex-shrink: 0;
 }
 
 .icon-button.active {

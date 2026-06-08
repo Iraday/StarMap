@@ -147,6 +147,7 @@ let orbitAdjustState = null;
 let orbitPreviewRoute = null;
 let shipBulkMode = false;
 let fleetBulkMode = false;
+let showShipOverFleet = false; // when true, show ship info instead of fleet info in the shared panel
 let shipInfoEditing = false;
 let fleetPanelUpdateTimer = 0;        // throttle fleet panel updates
 let rightClickCommandState = { time: 0, x: 0, y: 0 };
@@ -2456,6 +2457,7 @@ function selectFleet(fleetId) {
   const fleet = fleets.find((item) => item.id === fleetId);
   if (!fleet) return;
   selectedFleetId = fleet.id;
+  showShipOverFleet = false;
   setSelectedShips(fleet.shipIds, { primaryId: fleet.shipIds[0], keepFleet: true });
   showFleetInfoPanel(fleet);
 }
@@ -3839,7 +3841,7 @@ function makePanelDraggable(panel, handle, storageKey) {
   lockBtn.title = locked ? "解锁拖拽" : "锁定位置";
   lockBtn.textContent = locked ? "●" : "○";
   const hideButton = handle.querySelector(".panel-hide, .ship-info-close, .panel-toggle, .fleet-panel-toggle, .time-hud-toggle");
-  if (hideButton) handle.insertBefore(lockBtn, hideButton);
+  if (hideButton) hideButton.parentNode.insertBefore(lockBtn, hideButton);
   else handle.appendChild(lockBtn);
   lockBtn.addEventListener("click", (event) => {
     event.stopPropagation();
@@ -4448,6 +4450,17 @@ function timePartsToDays(parts = {}) {
     + Number(parts.minutes || 0) / 1440
     + Number(parts.seconds || 0) / 86400
   );
+}
+
+function formatSpeed(speedC) {
+  if (!Number.isFinite(speedC) || speedC <= 0) return "0";
+  // speedC is in units of c (≈ ly/yr)
+  if (speedC >= 0.01) return `${+speedC.toFixed(4)}c (${+speedC.toFixed(4)} ly/yr)`;
+  // Very slow: show in ly/day or km/s
+  const lyPerDay = speedC / 365.25;
+  if (lyPerDay >= 0.0001) return `${+lyPerDay.toFixed(6)} ly/day`;
+  const kmPerSec = speedC * 299792.458;
+  return `${+kmPerSec.toFixed(1)} km/s`;
 }
 
 function parseShipSpeedSpec(value, fallback = null) {
@@ -5257,7 +5270,8 @@ function updateFleetPanel() {
     ? Array.from(factionFilter.selectedOptions).map((option) => option.value)
     : [];
   const wantedClass = typeFilter?.value || "all";
-  document.querySelector("#shipBulkPanel")?.style.setProperty("display", shipBulkMode ? "grid" : "none");
+  const showBulk = shipBulkMode || selectedShipIds.size > 1;
+  document.querySelector("#shipBulkPanel")?.style.setProperty("display", showBulk ? "grid" : "none");
   document.querySelector("#shipBulkToggle")?.classList.toggle("active", shipBulkMode);
   const filteredShips = ships.filter((ship) => {
     if (selectedFactions.length && !selectedFactions.includes(ship.faction)) return false;
@@ -5447,7 +5461,11 @@ function refreshSingleFleetWindow(fleetId) {
     row.addEventListener("click", (e) => {
       if (e.target.closest(".ship-row-camera")) return;
       const ship = findShip(row.dataset.shipId);
-      if (ship) selectShip(ship);
+      if (ship) {
+        // Select ship but keep the fleet context so fleet window stays open
+        showShipOverFleet = true;
+        setSelectedShips([ship.id], { primaryId: ship.id, keepFleet: true });
+      }
     });
     row.addEventListener("dblclick", () => {
       const ship = findShip(row.dataset.shipId);
@@ -5509,6 +5527,7 @@ function initStarMapDropTarget() {
 // ── Ship info panel ─────────────────────────────────────────────────
 
 function selectShip(ship) {
+  showShipOverFleet = false;
   setSelectedShips([ship.id], { primaryId: ship.id });
 }
 
@@ -5622,10 +5641,10 @@ function updateShipInfoPanel(ship) {
   if (ship.routeQueue?.length) rows.push({ k: "后续航段", v: `${ship.routeQueue.length} 段`, accent: true });
   rows.push({ k: "乘员", v: String(cls.crew), accent: false });
   rows.push({ k: "FTL", v: cls.ftl ? "是" : "否", accent: false });
-  rows.push({ k: "最大速度", v: `${cls.maxSpeed}c`, accent: false });
+  rows.push({ k: "最大速度", v: formatSpeed(cls.maxSpeed), accent: false });
 
   if (ship.state === "traveling") {
-    rows.push({ k: "航速", v: `${ship.travelSpeed}c`, accent: true });
+    rows.push({ k: "航速", v: formatSpeed(ship.travelSpeed), accent: true });
     rows.push({ k: "距离", v: `${info.distanceLy.toFixed(2)} ly`, accent: false });
     rows.push({ k: "ETA", v: formatElapsedTime(info.travelEtaDays), accent: true });
     rows.push({ k: "时间膨胀", v: info.timeDilation, accent: true });
@@ -5719,11 +5738,11 @@ function showShipInfo(ship) {
   }
   if (ship.state === "traveling") {
     rows.push(`航行进度: ${info.travelProgress}  距离: ${info.distanceLy.toFixed(2)} ly`);
-    rows.push(`航速: ${ship.travelSpeed}c  ETA: ${formatElapsedTime(info.travelEtaDays)}`);
+    rows.push(`航速: ${formatSpeed(ship.travelSpeed)}  ETA: ${formatElapsedTime(info.travelEtaDays)}`);
     rows.push(`时间膨胀: ${info.timeDilation}  船员经历: ${formatElapsedTime(info.crewElapsedDays)}`);
     rows.push(`船员累计固有时: ${formatElapsedTime(info.crewTotalDays)}`);
   }
-  rows.push(`乘员: ${cls.crew}  FTL: ${cls.ftl ? "是" : "否"}  最大速度: ${cls.maxSpeed}c`);
+  rows.push(`乘员: ${cls.crew}  FTL: ${cls.ftl ? "是" : "否"}  最大速度: ${formatSpeed(cls.maxSpeed)}`);
   writeAgentOutput(rows.join("\n"));
   // Also show visual panel
   showShipInfoPanel(ship);
@@ -5764,7 +5783,7 @@ function animate() {
     if (fleetPanelUpdateTimer > fleetUpdateInterval) {
       fleetPanelUpdateTimer = 0;
       if (ships.length > 0) updateFleetPanel();
-      if (selectedFleetId && selectedFleet()) {
+      if (selectedFleetId && selectedFleet() && !showShipOverFleet) {
         showFleetInfoPanel(selectedFleet());
       } else if (selectedShipId) {
         const selShip = findShip(selectedShipId);

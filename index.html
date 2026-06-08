@@ -201,13 +201,13 @@
       </section>
 
       <section class="panel panel-right" aria-label="恒星系详情">
-        <button id="toggleRight" class="panel-toggle panel-toggle-right panel-hide" type="button" title="隐藏">×</button>
         <div class="detail-head">
           <div class="detail-head-text">
             <p class="kicker">选中恒星系</p>
             <h2 id="detailTitle">太阳 / Sol</h2>
           </div>
           <button id="detailEditBtn" class="panel-hide info-edit-btn" type="button" title="编辑当前信息">✎</button>
+          <button id="toggleRight" class="panel-toggle panel-toggle-right panel-hide" type="button" title="隐藏">×</button>
         </div>
         <nav id="detailTabs" class="detail-tabs" aria-label="详情横向导航"></nav>
         <div id="detailList" class="detail-list"></div>
@@ -221,13 +221,13 @@
 
       <!-- Fleet management panel (bottom-left floating) -->
       <div id="fleetPanel" class="fleet-panel" aria-label="舰队管理">
-        <button id="fleetPanelToggle" class="fleet-panel-toggle panel-hide" type="button" title="隐藏">×</button>
         <div class="fleet-panel-inner">
           <div class="fleet-panel-header">
             <span>舰船控制</span>
             <span class="fleet-panel-tools">
               <span id="shipSelectionCount" class="fleet-panel-count">0</span>
               <button id="shipBulkToggle" class="icon-button" type="button" title="批量选择">☑</button>
+              <button id="fleetPanelToggle" class="fleet-panel-toggle panel-hide" type="button" title="隐藏">×</button>
             </span>
           </div>
           <div class="fleet-tabs" role="tablist" aria-label="舰船页签">
@@ -377,6 +377,6 @@
       </div>
     </main>
 
-    <script type="module" src="./app.js?v=14"></script>
+    <script type="module" src="./app.js?v=16"></script>
   </body>
 </html>
