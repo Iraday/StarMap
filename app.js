@@ -2451,6 +2451,14 @@ function loadFleets(records = []) {
   normalizeFleets();
 }
 
+function collectAllFactions() {
+  const set = new Set(Object.keys(factionColors));
+  for (const star of stars) if (star.faction) set.add(star.faction);
+  for (const ship of ships) if (ship.faction) set.add(ship.faction);
+  for (const fleet of fleets) if (fleet.faction) set.add(fleet.faction);
+  return Array.from(set).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+}
+
 function deriveFleetFaction(fleet) {
   if (fleet.faction) return fleet.faction;
   const counts = new Map();
