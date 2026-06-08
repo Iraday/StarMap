@@ -2218,7 +2218,12 @@ function updateFlyControls(deltaSeconds) {
   const active = document.activeElement;
   if (active && ["INPUT", "SELECT", "TEXTAREA"].includes(active.tagName)) return;
 
-  const speed = (pressedKeys.has("shift") ? 34 : 17) * deltaSeconds;
+  // Scale movement to the current zoom: distance from camera to target. When zoomed
+  // far out (star map) this is large and fast; inside a system view it is small so the
+  // camera drifts gently from body to body instead of leaving the system in one press.
+  const zoomDist = camera.position.distanceTo(controls.target);
+  const speedScale = Math.max(0.05, zoomDist * 0.7);
+  const speed = (pressedKeys.has("shift") ? 2 : 1) * speedScale * deltaSeconds;
   const forward = new THREE.Vector3();
   camera.getWorldDirection(forward).normalize();
   const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion).normalize();
@@ -2302,7 +2307,11 @@ function bodyNameForId(starId, bodyId) {
 }
 
 function bodyWorldPoint(starId, bodyId) {
-  const mesh = bodyMeshes.find((item) => item.userData?.body?.id === bodyId && item.userData?.star?.id === starId);
+  // Match the actual body sphere, NOT the orbit ring (which is centred on the star
+  // and shares the same body id). Prefer a SphereGeometry mesh.
+  const candidates = bodyMeshes.filter((item) =>
+    item.userData?.body?.id === bodyId && item.userData?.star?.id === starId && !item.userData?.isBodyOrbit);
+  const mesh = candidates.find((m) => m.geometry?.type === "SphereGeometry") || candidates[0];
   if (mesh?.visible) {
     const point = new THREE.Vector3();
     mesh.getWorldPosition(point);
@@ -2399,7 +2408,8 @@ function closestVisibleBodyToPoint(point) {
   if (!point || !bodyMeshes.length) return null;
   let best = null;
   for (const mesh of bodyMeshes) {
-    if (!mesh.visible || !mesh.userData.body) continue;
+    // Skip orbit rings (centred on the star) — only consider actual body spheres.
+    if (!mesh.visible || !mesh.userData.body || mesh.userData.isBodyOrbit) continue;
     const pos = new THREE.Vector3();
     mesh.getWorldPosition(pos);
     const dist = pointDistance(point, vectorToArray(pos));
@@ -4574,7 +4584,29 @@ function bindUi() {
     activeFaction = "all";
     updateVisibility();
   });
-  searchFilter.addEventListener("input", updateVisibility);
+  let searchFocusTimer = null;
+  searchFilter.addEventListener("input", () => {
+    updateVisibility();
+    // Bring the best-matching star into view so the search visibly works (debounced).
+    clearTimeout(searchFocusTimer);
+    const raw = searchFilter.value.trim();
+    if (!raw) return;
+    searchFocusTimer = setTimeout(() => {
+      const star = findLocalStar(raw);
+      if (!star) return;
+      if (inSystemView) exitSystemView();
+      moveCameraToStar(star, 14);
+      showDetails(star);
+    }, 420);
+  });
+  searchFilter.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    const star = findLocalStar(searchFilter.value.trim());
+    if (!star) return;
+    if (inSystemView) exitSystemView();
+    moveCameraToStar(star, 10);
+    showDetails(star);
+  });
   minPlanets.addEventListener("input", updateVisibility);
   yearSlider.addEventListener("input", updateVisibility);
   starScale.addEventListener("input", updateScale);
