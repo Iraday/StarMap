@@ -164,10 +164,44 @@ function hydrateShip(record) {
     routeQueue: Array.isArray(record.routeQueue) ? record.routeQueue.map(cloneRouteWaypoint).filter(Boolean) : [],
     pendingOrbit: cloneOrbit(record.pendingOrbit),
     orbit: cloneOrbit(record.orbit),
+    // ── Communication status (used by the signal-propagation command system) ──
+    comm: hydrateComm(record.comm),
+    // Priority of the command the ship is currently executing (null = none/idle).
+    // UI / instant commands use a very high priority; propagated agent commands use their own.
+    activePriority: record.activePriority === undefined || record.activePriority === null
+      ? null
+      : Number(record.activePriority),
     mesh: null,
     label: null,
     trail: null,
   };
+}
+
+/**
+ * Normalise a ship communication descriptor.
+ * - canBroadcast: may originate/relay commands to other units.
+ * - canReceive:   may accept incoming commands at all.
+ * - receiveThreshold: minimum *arriving* signal strength required to accept a command.
+ * - broadcastStrength: default emitted strength when this ship is the transmitter.
+ * - antennaGain: multiplies arriving strength before the threshold check (receiver sensitivity).
+ */
+function hydrateComm(comm = {}) {
+  comm = comm || {};
+  return {
+    canBroadcast: comm.canBroadcast === undefined ? true : Boolean(comm.canBroadcast),
+    canReceive: comm.canReceive === undefined ? true : Boolean(comm.canReceive),
+    receiveThreshold: Number.isFinite(Number(comm.receiveThreshold)) ? Number(comm.receiveThreshold) : 0,
+    broadcastStrength: Number.isFinite(Number(comm.broadcastStrength)) ? Number(comm.broadcastStrength) : 1,
+    antennaGain: Number.isFinite(Number(comm.antennaGain)) ? Number(comm.antennaGain) : 1,
+  };
+}
+
+/** Update a ship's communication status. Agent-callable. */
+export function setShipComm(shipId, fields = {}) {
+  const ship = ships.find((s) => s.id === shipId);
+  if (!ship) throw new Error(`Ship not found: ${shipId}`);
+  ship.comm = hydrateComm({ ...ship.comm, ...fields });
+  return ship.comm;
 }
 
 export function createShip(opts) {
@@ -474,6 +508,8 @@ export function shipInfo(ship) {
     maxSpeed: `${cls.maxSpeed} c`,
     ftl: cls.ftl,
     travelSpeed: `${ship.travelSpeed} c`,
+    comm: ship.comm ? { ...ship.comm } : undefined,
+    activePriority: ship.activePriority ?? null,
   };
   if (ship.pendingOrbit) {
     info.pendingOrbit = {

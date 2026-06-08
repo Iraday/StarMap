@@ -53,7 +53,11 @@ http://127.0.0.1:8765/
 - 如果双击恒星后只有自动生成的占位天体，镜头只会拉近主星；有正式内部结构种子的恒星系会展开缩小主星、行星轨道、卫星和小行星带。双击内部行星/卫星会保持或打开内部结构并选中该天体。
 - Agent 控制台通过下拉菜单选择显示，支持 zoom、距离计算、最近邻、筛选和内部结构查询。
 - 时间默认 `1秒/秒`，空格键暂停/继续；时间面板可用预设或自定义 `年/月/日/时/分/秒` 组合流速。
-- 舰船控制面板有“舰船 / 舰队 / 生成”页签，支持势力和舰级筛选、相机跟随、框选多舰、自动编队、舰队成员循环定位、批量删除/编队/改势力/改速度；舰船、星港、空间站、巨构、小行星等使用不同符号图标和 3D 形状。
+- 舰船控制面板有“舰船 / 生成 / 舰队 ↗”页签，支持势力和舰级筛选、相机跟随、框选多舰、多选编辑；舰船、星港、空间站、巨构、小行星等使用不同符号图标和 3D 形状。
+- “舰队 ↗”打开独立的**舰队管理**浮窗：舰队行显示势力与最近位置，可从舰船列表拖拽舰船编入已有舰队或拖到底部创建新舰队；支持单击选择、Ctrl/Shift 多选。
+- 每个窗口只有一个**编辑（✎）**图标，按所选数量自动切换“单个编辑 / 批量编辑”。编辑时弹出大窗并**冻结场景、暂停时间**，仅该窗口可交互。窗口内各功能（势力可搜索选择、速度、历史/备注 Markdown、通信状态）分区展示。
+- 舰队/舰船编成用**双列穿梭框**（已编入 ↔ 可选），支持按钮、双击、拖拽移动；列表同时含舰船与舰队条目，可整支舰队编入实现**合并**，也可分拆为新舰队；一艘舰船可同时归属多支舰队。
+- 舰船具有**通信状态**（能否广播/接收、接收强度阈值、广播强度、天线增益）。Agent 下达的命令可按真实信号传播：从发出点以传输速度扩散，舰船在波前到达且满足强度阈值、未被更高优先级占用时才执行，详见下文 Agent 接口。
 - 舰船生成可自定义速度，例如 `0.4c`、`1ly/sec`、`1000000km/hour`，内部统一换算为光速倍数。所属势力留空时写为 `无/无所属`。
 - 选中舰船或小行星后，独立舰船命令面板会自动出现；双击右键可下达航行命令。点恒星飞向恒星，点内部天体飞向该天体，点空处飞向当前视平面坐标。预定航线以带箭头虚线显示，单击航线可选中对应舰船。
 - 设置目的地时按住 `Ctrl` 会追加航点，按住 `Shift` 会把航线设为巡逻/循环；两者可组合，例如先追加航点再追加返航段。
@@ -111,6 +115,52 @@ await StarMapAgent.updateBody({ id: "test-b", terraformStatus: "terraforming", h
 await StarMapAgent.editBodyInfo("halley", { orbitalPeriodDays: 27700 })
 await StarMapAgent.editShipInfo(ship.id, { name: "晨线-01A", faction: "无/无所属", notes: "巡航备注" })
 StarMapAgent.getState()
+```
+
+### 命令传播与通信（信号系统）
+
+用户在界面里下达的移动/入轨命令视为**瞬时、最高优先级**（立即执行）。Agent 通过 API 下达命令时，可以选择**真实信号传播**：命令带有发出坐标、传输速度（c）、信号强度与优先级，从发出点以传输速度向外扩散，舰船只有在波前到达其**当前位置**时才会收到；收到后还要满足接收条件且不被更高优先级任务占用，否则丢弃。
+
+- 传播触发条件：同时提供了发出点（`issuePoint` 坐标 / `issueFrom` 星名或舰名 / `broadcastFrom` 中继舰）**且** `transmitSpeed > 0`。任一缺省则按瞬时最高优先级执行（向后兼容，默认留空即瞬时）。
+- 到达强度 = `信号强度 × 天线增益 ÷ (1 + 距离²)`（平方反比衰减）。低于该舰 `receiveThreshold` 即被丢弃。
+- 舰船通信状态 `comm`：`canBroadcast`（能否广播/中继）、`canReceive`（能否接收）、`receiveThreshold`（接收强度下限）、`broadcastStrength`（作为发射端的默认强度）、`antennaGain`（接收灵敏度增益）。
+- 优先级门控：若舰船正在执行的命令优先级**严格高于**新命令，则忽略新命令；任务完成（变为 idle）后优先级复位，可再次接收。界面命令使用优先级 `1e9`。
+- 性能：信号队列只保存在途信号，每个信号每帧 O(1) 距离判定，送达/丢弃后即出队；并用“最早可能到达日”下界跳过尚不可能到达的判定，避免大量并发命令造成卡顿。
+
+```js
+// 设置/查询通信状态
+StarMapAgent.setShipComm(["ship-1"], { canBroadcast: true, canReceive: true, receiveThreshold: 0.5, broadcastStrength: 800, antennaGain: 1 })
+StarMapAgent.getShipComm("ship-1")
+StarMapAgent.listShipComm({ faction: "人类群星" })
+
+// 传播式命令：从坐标 / 从星名 / 从中继舰广播
+StarMapAgent.moveShip("ship-1", "gj1002", { issueFrom: "barnard", transmitSpeed: "1c", signalStrength: 100, priority: 5 })
+StarMapAgent.transmitMove(["ship-1", "ship-2"], "gj1002", { broadcastFrom: "ship-relay", transmitSpeed: "2c", priority: 7 })
+StarMapAgent.moveFleet("fleet-1", "sol", { issuePoint: [0, 0, 0], transmitSpeed: "0.5c", signalStrength: 1000, priority: 3 })
+
+// 查看在途信号与最近的送达/丢弃记录
+StarMapAgent.listSignals()
+StarMapAgent.signalLog(50)
+StarMapAgent.cancelSignal("sig-1")
+StarMapAgent.clearSignals()
+```
+
+### 舰队管理 API（独立 `window.starMapFleetAPI`）
+
+舰队管理窗口、统一编辑面板（含双列编入穿梭框、合并、分拆、多重归属）对应的程序化接口：
+
+```js
+starMapFleetAPI.openFleetManager(); starMapFleetAPI.closeFleetManager()
+starMapFleetAPI.listFleets()
+starMapFleetAPI.fleetInfo("fleet-1")
+starMapFleetAPI.editFleet("fleet-1", { name: "先锋舰队", faction: "人类群星", leader: "李司令", foundedDate: "AD 2345", history: "# 沿革..." })
+starMapFleetAPI.setFleetFaction("fleet-1", "明日晨曦")
+starMapFleetAPI.setFleetSpeed("fleet-1", "0.4c")
+starMapFleetAPI.addShipToFleet("ship-3", "fleet-1")    // 支持一舰多队
+starMapFleetAPI.removeShipFromFleet("ship-3", "fleet-1")
+starMapFleetAPI.splitFleet("fleet-1", ["ship-2"], "先锋-分队")
+starMapFleetAPI.duplicateFleetShips("fleet-1")
+starMapFleetAPI.deleteFleet("fleet-2")
 ```
 
 HTTP API：

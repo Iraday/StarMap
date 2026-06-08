@@ -2509,3 +2509,15 @@ button[aria-pressed="true"] {
 .ship-list .ship-row:hover {
   background: rgba(114, 214, 201, 0.14);
 }
+
+.be-comm-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+}
+
+.be-comm-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}

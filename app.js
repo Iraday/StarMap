@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { fallbackStars, fallbackBodies } from "./star_data.js?v=2";
 import { orbitPeriodByName, solPeriods, orbitPeriodBySma } from "./orbit_periods.js";
-import { shipClasses, shipCategories, ships, createShip, createAsteroid, commandTravel, commandTravelToPoint, commandOrbitAroundPoint, tickShips, shipWorldPosition, shipInfo, listShips, removeShip, lorentz, travelTimes, getFleetSummary, serializeShips, loadShips } from "./ships.js?v=3";
+import { shipClasses, shipCategories, ships, createShip, createAsteroid, commandTravel, commandTravelToPoint, commandOrbitAroundPoint, tickShips, shipWorldPosition, shipInfo, listShips, removeShip, lorentz, travelTimes, getFleetSummary, serializeShips, loadShips, setShipComm } from "./ships.js?v=4";
 
 const canvas = document.querySelector("#map");
 const detailTitle = document.querySelector("#detailTitle");
@@ -2548,6 +2548,7 @@ function commandShipToStar(ship, destStarId, opts = {}) {
     destinationLabel: dest.short || dest.name,
     distanceLy,
   });
+  if (moved) moved.activePriority = (opts._priority != null ? opts._priority : UI_COMMAND_PRIORITY);
   writeAgentOutput({ action: "moveShip", ship: shipInfo(moved) });
   updateShipMeshes();
   updateShipRoutes();
@@ -2568,6 +2569,7 @@ function commandShipToPoint(ship, point, label = "自由坐标", opts = {}) {
     distanceLy,
     destinationLabel: label,
   });
+  if (moved) moved.activePriority = (opts._priority != null ? opts._priority : UI_COMMAND_PRIORITY);
   writeAgentOutput({ action: "moveShipToPoint", label, ship: shipInfo(moved) });
   updateShipMeshes();
   updateShipRoutes();
@@ -2596,6 +2598,7 @@ function commandShipOrbitPoint(ship, centerPoint, label = "轨道中心", opts =
     periodDays,
     targetLabel: label,
   });
+  if (moved) moved.activePriority = (opts._priority != null ? opts._priority : UI_COMMAND_PRIORITY);
   writeAgentOutput({ action: "orbitShip", label, radiusLy, periodDays, ship: shipInfo(moved) });
   updateShipMeshes();
   updateShipRoutes();
@@ -2638,6 +2641,157 @@ function commandShipsOrbitPoint(shipList, point, label = "轨道中心", opts = 
     }
   }
   return moved;
+}
+
+// ── Signal-propagation command system ──────────────────────────────
+//
+// User (UI) commands are instantaneous and authoritative (highest priority).
+// Agent commands may instead be transmitted realistically: a command carries an
+// issue location, a transmit speed (c), a signal strength and a priority number.
+// The command travels outward from the issue point at the transmit speed; a ship
+// only executes it once the wavefront reaches the ship's *current* position, and
+// only if (a) the ship can receive, (b) the strength surviving the trip clears the
+// ship's receive threshold, and (c) the ship is not already executing a command of
+// strictly higher priority. Otherwise the command is dropped.
+//
+// Performance: the queue only ever holds in-flight signals; each is checked in O(1)
+// per tick (one distance test) and removed on delivery/drop. An `earliestArrivalDay`
+// lower bound lets us skip the distance test entirely until the wavefront could
+// possibly have reached the (even maximally fleeing/approaching) ship.
+
+const UI_COMMAND_PRIORITY = 1e9; // instant/UI commands win over any realistic transmission
+const SIGNAL_FALLOFF = 1;        // inverse-square attenuation coefficient (per ly²)
+const C_LY_PER_DAY = 1 / 365.25; // 1c = 1 ly/yr = 1/365.25 ly/day
+let pendingSignals = [];
+let nextSignalId = 1;
+let signalLog = []; // recent delivery/drop outcomes, for the agent & debugging
+
+function arrivingSignalStrength(strength, distanceLy, antennaGain = 1) {
+  return (Number(strength) || 0) * (antennaGain || 1) / (1 + SIGNAL_FALLOFF * distanceLy * distanceLy);
+}
+
+function logSignalOutcome(entry) {
+  signalLog.push({ day: +totalSimDays.toFixed(3), ...entry });
+  if (signalLog.length > 200) signalLog = signalLog.slice(-200);
+}
+
+/**
+ * Resolve the propagation parameters from agent opts. Returns null when the command
+ * should execute instantly (no issue point or no positive transmit speed).
+ */
+function resolveCommOpts(opts = {}) {
+  let issuePoint = null;
+  if (Array.isArray(opts.issuePoint) && opts.issuePoint.length >= 3) {
+    issuePoint = opts.issuePoint.slice(0, 3).map(Number);
+  } else if (opts.broadcastFrom) {
+    const relay = findShip(opts.broadcastFrom);
+    if (!relay) throw new Error(`Broadcast ship not found: ${opts.broadcastFrom}`);
+    if (relay.comm?.canBroadcast === false) throw new Error(`${relay.name} cannot broadcast`);
+    const pos = shipWorldPosition(relay, getStarWorldPos);
+    if (pos) issuePoint = [pos.x, pos.y, pos.z];
+    if (opts.signalStrength === undefined && relay.comm) opts = { ...opts, signalStrength: relay.comm.broadcastStrength };
+  } else if (opts.issueFrom || opts.issueStarId) {
+    const target = resolveNavTarget(opts.issueFrom || opts.issueStarId);
+    if (target?.point) issuePoint = Array.isArray(target.point) ? target.point.slice(0, 3) : [target.point.x, target.point.y, target.point.z];
+  }
+  const transmitSpeed = parseShipSpeedSpec(opts.transmitSpeed, 0);
+  if (!issuePoint || !(transmitSpeed > 0)) return null; // → instant
+  return {
+    issuePoint,
+    transmitSpeed,
+    signalStrength: Number.isFinite(Number(opts.signalStrength)) ? Number(opts.signalStrength) : 1,
+    priority: Number.isFinite(Number(opts.priority)) ? Number(opts.priority) : 0,
+    relayId: opts.broadcastFrom || null,
+  };
+}
+
+function enqueueSignal(ship, comm, execute, label) {
+  const pos = shipWorldPosition(ship, getStarWorldPos);
+  const dist0 = pos ? Math.hypot(pos.x - comm.issuePoint[0], pos.y - comm.issuePoint[1], pos.z - comm.issuePoint[2]) : 0;
+  // Gap closes at most at (transmitSpeed + ship maxSpeed) → earliest possible arrival.
+  const closingC = comm.transmitSpeed + (ship.classInfo?.maxSpeed || 0);
+  const earliestArrivalDay = totalSimDays + (closingC > 0 ? dist0 / (closingC * C_LY_PER_DAY) : 0);
+  const sig = {
+    id: `sig-${nextSignalId++}`,
+    shipId: ship.id,
+    issuePoint: comm.issuePoint.slice(),
+    transmitSpeed: comm.transmitSpeed,
+    signalStrength: comm.signalStrength,
+    priority: comm.priority,
+    relayId: comm.relayId,
+    issueDay: totalSimDays,
+    earliestArrivalDay,
+    label: label || "",
+    execute,
+  };
+  pendingSignals.push(sig);
+  return sig;
+}
+
+/**
+ * Issue a command to a set of ships. If propagation params are present the command
+ * is transmitted (one independent signal per ship); otherwise it executes instantly
+ * at top priority. `executeFor(ship, optsWithPriority)` performs the real action.
+ */
+function issueShipCommand(targetShips, opts, executeFor) {
+  const comm = resolveCommOpts(opts);
+  if (!comm) {
+    targetShips.forEach((ship) => {
+      const p = Number.isFinite(Number(opts.priority)) ? Number(opts.priority) : UI_COMMAND_PRIORITY;
+      executeFor(ship, { ...opts, _priority: p });
+    });
+    return { mode: "instant", count: targetShips.length };
+  }
+  const signalIds = [];
+  targetShips.forEach((ship) => {
+    const sig = enqueueSignal(ship, comm, (s) => executeFor(s, { ...opts, _priority: comm.priority }), opts.label);
+    signalIds.push(sig.id);
+  });
+  return {
+    mode: "transmit",
+    count: targetShips.length,
+    transmitSpeed: comm.transmitSpeed,
+    signalStrength: comm.signalStrength,
+    priority: comm.priority,
+    signalIds,
+  };
+}
+
+/** Process all in-flight signals for the given sim day. Cheap: O(pending). */
+function processSignals(currentDay) {
+  if (!pendingSignals.length) return;
+  const remaining = [];
+  for (const sig of pendingSignals) {
+    const ship = findShip(sig.shipId);
+    if (!ship) { logSignalOutcome({ id: sig.id, shipId: sig.shipId, result: "dropped", reason: "ship-gone" }); continue; }
+    if (currentDay < sig.earliestArrivalDay) { remaining.push(sig); continue; } // wavefront can't have arrived yet
+    const pos = shipWorldPosition(ship, getStarWorldPos);
+    if (!pos) { remaining.push(sig); continue; }
+    const dist = Math.hypot(pos.x - sig.issuePoint[0], pos.y - sig.issuePoint[1], pos.z - sig.issuePoint[2]);
+    const wavefront = (currentDay - sig.issueDay) * sig.transmitSpeed * C_LY_PER_DAY;
+    if (wavefront + 1e-9 < dist) { remaining.push(sig); continue; } // not reached yet
+    // Wavefront has reached the ship — evaluate reception.
+    const eff = arrivingSignalStrength(sig.signalStrength, dist, ship.comm?.antennaGain ?? 1);
+    const base = { id: sig.id, shipId: ship.id, name: ship.name, priority: sig.priority, distanceLy: +dist.toFixed(4), arrivingStrength: +eff.toFixed(5) };
+    if (ship.comm?.canReceive === false) { logSignalOutcome({ ...base, result: "dropped", reason: "receiver-off" }); continue; }
+    if (eff < (ship.comm?.receiveThreshold ?? 0)) { logSignalOutcome({ ...base, result: "dropped", reason: "below-threshold", threshold: ship.comm?.receiveThreshold ?? 0 }); continue; }
+    if (ship.activePriority != null && ship.activePriority > sig.priority) { logSignalOutcome({ ...base, result: "ignored", reason: "busy-higher-priority", activePriority: ship.activePriority }); continue; }
+    try {
+      sig.execute(ship);
+      ship.activePriority = sig.priority;
+      logSignalOutcome({ ...base, result: "executed" });
+    } catch (error) {
+      logSignalOutcome({ ...base, result: "error", reason: error.message });
+    }
+  }
+  pendingSignals = remaining;
+}
+
+/** Reset a ship's command priority once it finishes its current task (becomes idle). */
+function resetIdlePriority(ship) {
+  if (ship && ship.state === "idle" && ship.routeQueue.length === 0 && !ship.pendingOrbit) {
+    ship.activePriority = null;
+  }
 }
 
 function commandShipToNavTarget(ship, target, opts = {}) {
@@ -3701,15 +3855,19 @@ function exposeAgentApi() {
       writeAgentOutput({ action: "deployShip", ship: shipInfo(ship) });
       return ship;
     },
-    moveShip: (shipId, destStarId, opts) => {
+    moveShip: (shipId, destStarId, opts = {}) => {
       const ship = ships.find((s) => s.id === shipId);
       if (!ship) throw new Error(`Ship not found: ${shipId}`);
-      return commandShipToStar(ship, destStarId, opts);
+      const result = issueShipCommand([ship], opts, (s, o) => commandShipToStar(s, destStarId, o));
+      writeAgentOutput({ action: "moveShip", ...result });
+      return result.mode === "transmit" ? result : shipInfo(ship);
     },
     moveShipToPoint: (shipId, point, opts = {}) => {
       const ship = ships.find((s) => s.id === shipId);
       if (!ship) throw new Error(`Ship not found: ${shipId}`);
-      return commandShipToPoint(ship, point, opts.label || "自由坐标", opts);
+      const result = issueShipCommand([ship], opts, (s, o) => commandShipToPoint(s, point, o.label || "自由坐标", o));
+      writeAgentOutput({ action: "moveShipToPoint", ...result });
+      return result.mode === "transmit" ? result : shipInfo(ship);
     },
     shipInfo: (shipId) => {
       const ship = ships.find((s) => s.id === shipId);
@@ -3788,15 +3946,19 @@ function exposeAgentApi() {
     },
     moveShips: (shipIds, destStarId, opts = {}) => {
       const targets = (Array.isArray(shipIds) ? shipIds : [shipIds]).map(findShip).filter(Boolean);
-      return commandShipsToStar(targets, destStarId, opts).map((ship) => shipInfo(ship));
+      const result = issueShipCommand(targets, opts, (s, o) => commandShipToStar(s, destStarId, o));
+      writeAgentOutput({ action: "moveShips", ...result });
+      return result.mode === "transmit" ? result : targets.map((ship) => shipInfo(ship));
     },
     setShipRoute: (shipIds, destinations, opts = {}) => {
       const targets = (Array.isArray(shipIds) ? shipIds : [shipIds]).map(findShip).filter(Boolean);
-      return routeShipsToTargets(targets, destinations, { ...opts, appendRoute: false }).map((ship) => shipInfo(ship));
+      const result = issueShipCommand(targets, opts, (s, o) => routeShipsToTargets([s], destinations, { ...o, appendRoute: false }));
+      return result.mode === "transmit" ? result : targets.map((ship) => shipInfo(ship));
     },
     appendShipRoute: (shipIds, destinations, opts = {}) => {
       const targets = (Array.isArray(shipIds) ? shipIds : [shipIds]).map(findShip).filter(Boolean);
-      return routeShipsToTargets(targets, destinations, { ...opts, appendRoute: true }).map((ship) => shipInfo(ship));
+      const result = issueShipCommand(targets, opts, (s, o) => routeShipsToTargets([s], destinations, { ...o, appendRoute: true }));
+      return result.mode === "transmit" ? result : targets.map((ship) => shipInfo(ship));
     },
     setShipSpeed: (shipIds, speedSpec) => {
       const speed = parseShipSpeedSpec(speedSpec, null);
@@ -3807,19 +3969,80 @@ function exposeAgentApi() {
       writeAgentOutput({ action: "setShipSpeed", speedC: speed, count: targets.length });
       return targets.map((ship) => shipInfo(ship));
     },
+    // ── Communication & signal-propagation API ──
+    setShipComm: (shipIds, fields = {}) => {
+      const targets = (Array.isArray(shipIds) ? shipIds : [shipIds]).map(findShip).filter(Boolean);
+      const out = targets.map((ship) => ({ id: ship.id, name: ship.name, comm: setShipComm(ship.id, fields) }));
+      updateShipInfoPanel(findShip(selectedShipId));
+      writeAgentOutput({ action: "setShipComm", count: out.length, comm: fields });
+      return out;
+    },
+    getShipComm: (shipId) => {
+      const ship = findShip(shipId);
+      if (!ship) throw new Error(`Ship not found: ${shipId}`);
+      return { id: ship.id, name: ship.name, comm: { ...ship.comm }, activePriority: ship.activePriority };
+    },
+    listShipComm: (filter) => {
+      const result = listShips(filter).map((s) => ({ id: s.id, name: s.name, faction: s.faction, comm: { ...s.comm }, activePriority: s.activePriority }));
+      writeAgentOutput(result);
+      return result;
+    },
+    /**
+     * Issue a transmitted (realistic) move command. Convenience wrapper that fills
+     * propagation params. `from` may be a coordinate [x,y,z], a star/ship/body name
+     * (issueFrom), or { broadcastFrom: shipId } to relay from a broadcasting ship.
+     */
+    transmitMove: (shipIds, destStarId, opts = {}) => {
+      const targets = (Array.isArray(shipIds) ? shipIds : [shipIds]).map(findShip).filter(Boolean);
+      const result = issueShipCommand(targets, opts, (s, o) => commandShipToStar(s, destStarId, o));
+      writeAgentOutput({ action: "transmitMove", ...result });
+      return result;
+    },
+    listSignals: () => {
+      const result = pendingSignals.map((s) => ({
+        id: s.id, shipId: s.shipId, priority: s.priority, transmitSpeedC: s.transmitSpeed,
+        signalStrength: s.signalStrength, issueDay: +s.issueDay.toFixed(3),
+        earliestArrivalDay: +s.earliestArrivalDay.toFixed(3), issuePoint: s.issuePoint, label: s.label,
+      }));
+      writeAgentOutput({ action: "listSignals", pending: result.length, signals: result });
+      return result;
+    },
+    signalLog: (limit = 50) => {
+      const result = signalLog.slice(-Math.max(1, limit));
+      writeAgentOutput({ action: "signalLog", entries: result });
+      return result;
+    },
+    cancelSignal: (signalId) => {
+      const before = pendingSignals.length;
+      pendingSignals = pendingSignals.filter((s) => s.id !== signalId);
+      return { cancelled: before - pendingSignals.length };
+    },
+    clearSignals: () => {
+      const n = pendingSignals.length;
+      pendingSignals = [];
+      writeAgentOutput({ action: "clearSignals", cleared: n });
+      return { cleared: n };
+    },
     moveFleet: (fleetId, destStarId, opts = {}) => {
       const fleet = fleets.find((item) => item.id === fleetId);
       if (!fleet) throw new Error(`Fleet not found: ${fleetId}`);
-      return commandShipsToStar(fleet.shipIds.map(findShip).filter(Boolean), destStarId, opts).map((ship) => shipInfo(ship));
+      const targets = fleet.shipIds.map(findShip).filter(Boolean);
+      const result = issueShipCommand(targets, opts, (s, o) => commandShipToStar(s, destStarId, o));
+      writeAgentOutput({ action: "moveFleet", fleetId, ...result });
+      return result.mode === "transmit" ? result : targets.map((ship) => shipInfo(ship));
     },
     orbitShip: (shipId, centerPoint, opts = {}) => {
       const ship = findShip(shipId);
       if (!ship) throw new Error(`Ship not found: ${shipId}`);
-      return shipInfo(commandShipOrbitPoint(ship, centerPoint, opts.label || opts.targetLabel || "轨道中心", opts));
+      const label = opts.label || opts.targetLabel || "轨道中心";
+      const result = issueShipCommand([ship], opts, (s, o) => commandShipOrbitPoint(s, centerPoint, label, o));
+      return result.mode === "transmit" ? result : shipInfo(ship);
     },
     orbitShips: (shipIds, centerPoint, opts = {}) => {
       const targets = (Array.isArray(shipIds) ? shipIds : [shipIds]).map(findShip).filter(Boolean);
-      return commandShipsOrbitPoint(targets, centerPoint, opts.label || opts.targetLabel || "轨道中心", opts).map((ship) => shipInfo(ship));
+      const label = opts.label || opts.targetLabel || "轨道中心";
+      const result = issueShipCommand(targets, opts, (s, o) => commandShipOrbitPoint(s, centerPoint, label, o));
+      return result.mode === "transmit" ? result : targets.map((ship) => shipInfo(ship));
     },
     fleetSummary: () => {
       const summary = getFleetSummary();
@@ -3930,6 +4153,7 @@ function exposeAgentApi() {
       totalSimDays,
       timeFlowDaysPerSec,
       shipCount: ships.length,
+      pendingSignals: pendingSignals.length,
       selectedShipIds: Array.from(selectedShipIds),
       selectedFleetId,
       fleetCount: fleets.length,
@@ -5979,6 +6203,16 @@ function buildBigEditSections(type, objects, bulk, mode) {
   }
   if (!bulk && type === "ship") {
     const ship = objects[0];
+    const c = ship.comm || {};
+    sections.push(section("通信状态", `
+      <div class="be-comm-grid">
+        <label class="be-field be-comm-check"><input type="checkbox" data-edit="canBroadcast" ${c.canBroadcast !== false ? "checked" : ""} /> <span>可广播命令</span></label>
+        <label class="be-field be-comm-check"><input type="checkbox" data-edit="canReceive" ${c.canReceive !== false ? "checked" : ""} /> <span>可接收命令</span></label>
+        <label class="be-field"><span>接收强度阈值</span><input data-edit="receiveThreshold" type="number" step="0.0001" value="${escapeHtml(String(c.receiveThreshold ?? 0))}" /></label>
+        <label class="be-field"><span>广播强度</span><input data-edit="broadcastStrength" type="number" step="0.1" value="${escapeHtml(String(c.broadcastStrength ?? 1))}" /></label>
+        <label class="be-field"><span>天线增益</span><input data-edit="antennaGain" type="number" step="0.1" value="${escapeHtml(String(c.antennaGain ?? 1))}" /></label>
+      </div>
+    `, "决定该舰能否广播/接收命令，以及可接收的信号强度下限。到达强度 = 广播强度 × 天线增益 ÷ (1 + 距离²)。"));
     sections.push(section("备注 (Markdown)", `
       <textarea class="be-md" data-edit="notes" rows="6" placeholder="# 备注">${escapeHtml(ship.notes || "")}</textarea>
     `));
@@ -6262,7 +6496,20 @@ function saveBigEdit() {
     });
   } else {
     objects.forEach((ship) => {
-      if (!bulk) { const nameV = get("name")?.value.trim(); if (nameV) ship.name = nameV; if (get("notes")) ship.notes = get("notes").value; }
+      if (!bulk) {
+        const nameV = get("name")?.value.trim(); if (nameV) ship.name = nameV;
+        if (get("notes")) ship.notes = get("notes").value;
+        // Communication status
+        if (get("canBroadcast")) {
+          setShipComm(ship.id, {
+            canBroadcast: get("canBroadcast").checked,
+            canReceive: get("canReceive").checked,
+            receiveThreshold: Number(get("receiveThreshold").value) || 0,
+            broadcastStrength: Number(get("broadcastStrength").value) || 0,
+            antennaGain: Number(get("antennaGain").value) || 1,
+          });
+        }
+      }
       if (faction) ship.faction = faction;
       if (speed != null) ship.travelSpeed = speed;
     });
@@ -6538,8 +6785,10 @@ function animate() {
     const events = tickShips(totalSimDays);
     for (const evt of events) {
       if (evt.type === "built") console.log(`🚀 ${evt.ship.name} 建造完成！`);
-      if (evt.type === "arrived") console.log(`📍 ${evt.ship.name} 抵达 ${evt.ship.locationStarId}`);
+      if (evt.type === "arrived") { console.log(`📍 ${evt.ship.name} 抵达 ${evt.ship.locationStarId}`); resetIdlePriority(evt.ship); }
     }
+    // Deliver in-flight command signals to ships whose wavefront has arrived
+    processSignals(totalSimDays);
     updateShipMeshes();
     updateTimeHud();
 
