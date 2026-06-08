@@ -148,6 +148,7 @@ let orbitPreviewRoute = null;
 let shipBulkMode = false;
 let fleetBulkMode = false;
 let showShipOverFleet = false; // when true, show ship info instead of fleet info in the shared panel
+let pickTargetInputId = null; // when set, next map click fills this input instead of selecting
 let shipInfoEditing = false;
 let fleetPanelUpdateTimer = 0;        // throttle fleet panel updates
 let rightClickCommandState = { time: 0, x: 0, y: 0 };
@@ -917,8 +918,11 @@ function refreshStarDatalist() {
   refreshNavObjectDatalist();
 }
 
-function refreshNavObjectDatalist() {
+let _navDatalistShipCount = -1; // cache guard: only rebuild when ship count changes
+function refreshNavObjectDatalist(force = false) {
   if (!navObjectNames) return;
+  if (!force && _navDatalistShipCount === ships.length) return;
+  _navDatalistShipCount = ships.length;
   const options = [];
   const seen = new Set();
   const push = (value, label) => {
@@ -2695,6 +2699,33 @@ function setupInteraction() {
   function pick(event) {
     if (event.button === 2) return;
     setPointer(event);
+
+    // ── Pick-target mode: click map object to fill an input field ──
+    if (pickTargetInputId) {
+      const inputEl = document.getElementById(pickTargetInputId);
+      if (inputEl) {
+        // Try body first, then star, then ship
+        const bodyHits = raycaster.intersectObjects(bodyMeshes.filter((m) => m.visible), false);
+        if (bodyHits.length) {
+          const body = bodyHits[0].object.userData.body;
+          if (body) { inputEl.value = body.name || body.id; finishPickTarget(); return; }
+        }
+        const starHits = raycaster.intersectObjects(starMeshes.filter((m) => m.visible), false);
+        if (starHits.length) {
+          const star = starHits[0].object.userData.star;
+          if (star) { inputEl.value = star.name || star.short || star.id; finishPickTarget(); return; }
+        }
+        const shipHits = raycaster.intersectObjects(getShipMeshTargets(), false);
+        if (shipHits.length) {
+          const ship = shipHits[0].object.userData.ship;
+          if (ship) { inputEl.value = ship.name || ship.id; finishPickTarget(); return; }
+        }
+      }
+      // Clicked empty space — cancel pick mode
+      finishPickTarget();
+      return;
+    }
+
     const measurement = pickMeasurement();
     if (measurement) return;
     const routeShip = pickShipRoute();
@@ -2738,6 +2769,31 @@ function setupInteraction() {
       controls.target.copy(hits[0].object.position);
     }
   }
+
+  function finishPickTarget() {
+    const prev = pickTargetInputId;
+    pickTargetInputId = null;
+    canvas.style.cursor = "";
+    document.querySelectorAll(".pick-target-btn").forEach((b) => b.classList.remove("active"));
+    if (prev) writeAgentOutput(`位置已设置。`);
+  }
+
+  // Bind pick-target buttons
+  document.querySelectorAll(".pick-target-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const targetInputId = btn.dataset.pickInput;
+      if (pickTargetInputId === targetInputId) {
+        // Toggle off
+        finishPickTarget();
+        return;
+      }
+      pickTargetInputId = targetInputId;
+      canvas.style.cursor = "crosshair";
+      document.querySelectorAll(".pick-target-btn").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      writeAgentOutput("点击地图上的恒星、天体或舰船来选取位置。");
+    });
+  });
 
   function isDoubleRightClick(event) {
     const now = performance.now();
@@ -3006,6 +3062,30 @@ function setupInteraction() {
 
   canvas.addEventListener("contextmenu", (event) => {
     event.preventDefault();
+    // In pick-target mode, right-click also picks
+    if (pickTargetInputId) {
+      setPointer(event);
+      const inputEl = document.getElementById(pickTargetInputId);
+      if (inputEl) {
+        const bodyHits = raycaster.intersectObjects(bodyMeshes.filter((m) => m.visible), false);
+        if (bodyHits.length) {
+          const body = bodyHits[0].object.userData.body;
+          if (body) { inputEl.value = body.name || body.id; finishPickTarget(); return; }
+        }
+        const starHits = raycaster.intersectObjects(starMeshes.filter((m) => m.visible), false);
+        if (starHits.length) {
+          const star = starHits[0].object.userData.star;
+          if (star) { inputEl.value = star.name || star.short || star.id; finishPickTarget(); return; }
+        }
+        const shipHits = raycaster.intersectObjects(getShipMeshTargets(), false);
+        if (shipHits.length) {
+          const ship = shipHits[0].object.userData.ship;
+          if (ship) { inputEl.value = ship.name || ship.id; finishPickTarget(); return; }
+        }
+      }
+      finishPickTarget();
+      return;
+    }
     if (shipCommandMode === "move") {
       if (isDoubleRightClick(event)) commandSelectedShipsFromPointer(event);
     } else if (orbitMouseAdjustEnabled) {

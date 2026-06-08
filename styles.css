@@ -1600,6 +1600,39 @@ button[aria-pressed="true"] {
   background: rgba(114, 214, 201, 0.14);
 }
 
+.input-with-pick {
+  display: flex;
+  gap: 3px;
+}
+
+.input-with-pick input {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.pick-target-btn {
+  display: grid;
+  place-items: center;
+  min-width: 28px;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: rgba(237, 243, 248, 0.06);
+  color: var(--muted);
+  cursor: crosshair;
+  font-size: 15px;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.pick-target-btn:hover,
+.pick-target-btn.active {
+  color: var(--accent);
+  border-color: rgba(114, 214, 201, 0.65);
+  background: rgba(114, 214, 201, 0.14);
+}
+
 .ship-bulk-panel {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

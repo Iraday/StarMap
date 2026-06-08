@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>2350 年人类文明太阳周边 50 光年星图</title>
-    <link rel="stylesheet" href="./styles.css?v=5" />
+    <link rel="stylesheet" href="./styles.css?v=6" />
     <script>
       window.onerror = function(msg, url, line, col, error) {
         console.error('[onerror]', msg, 'at', url + ':' + line + ':' + col, error ? error.stack : '');
@@ -268,7 +268,10 @@
             <div class="ship-control-grid" aria-label="舰船控制">
               <input id="shipNameInput" type="text" placeholder="舰名" />
               <select id="shipClassSelect" title="舰级"></select>
-              <input id="shipLocationInput" type="text" list="navObjectNames" placeholder="起点恒星/天体/舰船" />
+              <div class="input-with-pick">
+                <input id="shipLocationInput" type="text" list="navObjectNames" placeholder="起点恒星/天体/舰船" />
+                <button class="pick-target-btn" data-pick-input="shipLocationInput" type="button" title="点击地图选取位置">⊕</button>
+              </div>
               <input id="shipFactionInput" type="text" list="shipFactionNames" placeholder="所属势力，留空则跟随起点" />
               <input id="shipSpeedInput" type="text" placeholder="速度，如 0.4c / 1ly/sec / 1000000km/hour" />
               <datalist id="shipFactionNames"></datalist>
@@ -288,7 +291,10 @@
           <span id="shipCommandCount" class="fleet-panel-count">0</span>
         </div>
         <div class="ship-control-grid">
-          <input id="shipDestinationInput" type="text" list="navObjectNames" placeholder="目的地恒星/天体/舰船" />
+          <div class="input-with-pick">
+            <input id="shipDestinationInput" type="text" list="navObjectNames" placeholder="目的地恒星/天体/舰船" />
+            <button class="pick-target-btn" data-pick-input="shipDestinationInput" type="button" title="点击地图选取位置">⊕</button>
+          </div>
           <button id="moveShipBtn" type="button">航行</button>
           <div class="route-modifier-hint">Ctrl 追加航点；Shift 巡逻/循环；Ctrl+Shift 追加巡逻段</div>
           <div class="command-mode-row" aria-label="右键命令模式">
@@ -377,6 +383,6 @@
       </div>
     </main>
 
-    <script type="module" src="./app.js?v=16"></script>
+    <script type="module" src="./app.js?v=17"></script>
   </body>
 </html>
