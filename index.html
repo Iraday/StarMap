@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>2350 年人类文明太阳周边 50 光年星图</title>
-    <link rel="stylesheet" href="./styles.css?v=6" />
+    <link rel="stylesheet" href="./styles.css?v=7" />
     <script>
       window.onerror = function(msg, url, line, col, error) {
         console.error('[onerror]', msg, 'at', url + ':' + line + ':' + col, error ? error.stack : '');
@@ -226,14 +226,14 @@
             <span>舰船控制</span>
             <span class="fleet-panel-tools">
               <span id="shipSelectionCount" class="fleet-panel-count">0</span>
-              <button id="shipBulkToggle" class="icon-button" type="button" title="批量选择">☑</button>
+              <button id="shipBulkToggle" class="icon-button" type="button" title="批量编辑">☑</button>
               <button id="fleetPanelToggle" class="fleet-panel-toggle panel-hide" type="button" title="隐藏">×</button>
             </span>
           </div>
           <div class="fleet-tabs" role="tablist" aria-label="舰船页签">
             <button class="fleet-tab active" data-fleet-tab="ships" type="button">舰船</button>
-            <button class="fleet-tab" data-fleet-tab="fleets" type="button">舰队</button>
             <button class="fleet-tab" data-fleet-tab="commands" type="button">生成</button>
+            <button id="openFleetManagerBtn" class="fleet-tab" type="button" title="打开舰队管理窗口">舰队 ↗</button>
           </div>
           <section id="shipTabShips" class="fleet-tab-panel active" aria-label="所有舰船">
             <div class="ship-filter-row">
@@ -252,17 +252,8 @@
             </div>
             <div id="shipList" class="ship-list"></div>
           </section>
-          <section id="shipTabFleets" class="fleet-tab-panel" aria-label="舰队">
-            <div class="ship-control-buttons">
-              <button id="createFleetBtn" type="button">编队</button>
-              <button id="cycleFleetShipBtn" type="button">循环舰船</button>
-              <button id="fleetBulkToggle" class="icon-button" type="button" title="批量选择">☑</button>
-            </div>
-            <div id="fleetBulkPanel" class="ship-bulk-panel" style="display:none">
-              <button id="fleetBulkDeleteBtn" type="button">删除选中舰队</button>
-            </div>
-            <div id="fleetList" class="fleet-list"></div>
-          </section>
+          <!-- Fleet tab moved to independent window, hidden legacy section -->
+          <section id="shipTabFleets" class="fleet-tab-panel" aria-label="舰队" style="display:none!important"></section>
           <section id="shipTabCommands" class="fleet-tab-panel" aria-label="舰船生成">
             <div id="shipClassPalette" class="ship-class-palette" aria-label="舰级选择"></div>
             <div class="ship-control-grid" aria-label="舰船控制">
@@ -383,6 +374,6 @@
       </div>
     </main>
 
-    <script type="module" src="./app.js?v=17"></script>
+    <script type="module" src="./app.js?v=18"></script>
   </body>
 </html>

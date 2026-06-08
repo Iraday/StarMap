@@ -2400,7 +2400,7 @@ function normalizeFleets() {
     .filter((fleet) => fleet.shipIds.length > 0);
 }
 
-function createFleet(shipIds, name = "") {
+function createFleet(shipIds, name = "", opts = {}) {
   const uniqueIds = Array.from(new Set(shipIds)).filter((id) => findShip(id));
   if (uniqueIds.length === 0) return null;
   const fleet = {
@@ -2408,6 +2408,10 @@ function createFleet(shipIds, name = "") {
     name: name || `舰队-${nextFleetId - 1}`,
     shipIds: uniqueIds,
     createdDay: totalSimDays,
+    faction: opts.faction || "",
+    leader: opts.leader || "",
+    foundedDate: opts.foundedDate || "",
+    history: opts.history || "",
   };
   fleets.push(fleet);
   selectedFleetId = fleet.id;
@@ -2421,6 +2425,10 @@ function serializeFleets() {
     name: fleet.name,
     shipIds: fleet.shipIds.slice(),
     createdDay: fleet.createdDay || 0,
+    faction: fleet.faction || "",
+    leader: fleet.leader || "",
+    foundedDate: fleet.foundedDate || "",
+    history: fleet.history || "",
   }));
 }
 
@@ -2430,6 +2438,10 @@ function loadFleets(records = []) {
     name: record.name || `舰队-${nextFleetId}`,
     shipIds: Array.isArray(record.shipIds) ? record.shipIds.slice() : [],
     createdDay: Number(record.createdDay || 0),
+    faction: record.faction || "",
+    leader: record.leader || "",
+    foundedDate: record.foundedDate || "",
+    history: record.history || "",
   }));
   nextFleetId = 1;
   for (const fleet of fleets) {
@@ -2437,6 +2449,26 @@ function loadFleets(records = []) {
     nextFleetId = Math.max(nextFleetId, suffix + 1);
   }
   normalizeFleets();
+}
+
+function deriveFleetFaction(fleet) {
+  if (fleet.faction) return fleet.faction;
+  const counts = new Map();
+  for (const id of fleet.shipIds) {
+    const ship = findShip(id);
+    if (!ship) continue;
+    const f = ship.faction || "无所属";
+    counts.set(f, (counts.get(f) || 0) + 1);
+  }
+  let best = "无所属", bestN = 0;
+  for (const [f, n] of counts) { if (n > bestN) { best = f; bestN = n; } }
+  return best;
+}
+
+function describeFleetLocation(fleet) {
+  const first = fleet.shipIds.length ? findShip(fleet.shipIds[0]) : null;
+  if (!first) return "未知";
+  return describeShipLocation(first);
 }
 
 function setSelectedShips(shipIds, opts = {}) {
@@ -4312,7 +4344,15 @@ function bindUi() {
   // Ship info panel controls
   const shipInfoClose = document.querySelector("#shipInfoClose");
   if (shipInfoClose) shipInfoClose.addEventListener("click", deselectShip);
-  document.querySelector("#shipInfoEditBtn")?.addEventListener("click", openShipInfoEditor);
+  document.querySelector("#shipInfoEditBtn")?.addEventListener("click", () => {
+    // If we're showing fleet info (not ship info), open fleet editor instead
+    if (selectedFleetId && !showShipOverFleet) {
+      openFmEditPanel(selectedFleetId);
+      if (!fleetManagerWindow || fleetManagerWindow.style.display === "none") openFleetManagerWindow();
+      return;
+    }
+    openShipInfoEditor();
+  });
 
   const shipFollowBtn = document.querySelector("#shipFollowBtn");
   if (shipFollowBtn) {
@@ -5152,6 +5192,9 @@ function buildShipControlPanel() {
     writeAgentOutput({ action: "createFleet", fleet });
   });
 
+  // Open independent fleet manager window
+  document.querySelector("#openFleetManagerBtn")?.addEventListener("click", openFleetManagerWindow);
+
   document.querySelector("#cycleFleetShipBtn")?.addEventListener("click", cycleSelectedFleetShip);
   document.querySelector("#fleetBulkToggle")?.addEventListener("click", () => {
     fleetBulkMode = !fleetBulkMode;
@@ -5297,7 +5340,7 @@ function renderVirtualShipList(container, filteredShips) {
 function _shipRowHtml(ship) {
   const cls = ship.classInfo;
   const selected = selectedShipIds.has(ship.id) ? " selected" : "";
-  return `<div class="ship-row${selected}" data-ship-id="${escapeHtml(ship.id)}" title="${escapeHtml(cls.label)} · ${escapeHtml(ship.name)}">
+  return `<div class="ship-row${selected}" data-ship-id="${escapeHtml(ship.id)}" draggable="true" title="${escapeHtml(cls.label)} · ${escapeHtml(ship.name)}">
     <span class="ship-row-icon">${escapeHtml(cls.icon)}</span>
     <span class="ship-row-name">${escapeHtml(ship.name)}</span>
     <span class="ship-row-faction">${escapeHtml(ship.faction || "无所属")}</span>
@@ -5325,6 +5368,13 @@ function _bindShipListEvents(container) {
       const ship = findShip(row.dataset.shipId);
       if (ship) zoomToShip(ship);
     });
+    // Drag support for dropping into fleet manager
+    row.addEventListener("dragstart", (e) => {
+      e.dataTransfer.setData("text/ship-id", row.dataset.shipId);
+      e.dataTransfer.effectAllowed = "copyMove";
+      row.classList.add("dragging");
+    });
+    row.addEventListener("dragend", () => { row.classList.remove("dragging"); });
   });
   container.querySelectorAll(".ship-row-camera").forEach((btn) => {
     btn.addEventListener("click", (event) => {
@@ -5417,6 +5467,8 @@ function updateFleetPanel() {
       });
     });
   }
+  // Also refresh the fleet manager window if visible
+  refreshFleetManager();
 }
 
 // ── Fleet-specific ship windows ─────────────────────────────────────
@@ -5545,6 +5597,7 @@ function refreshSingleFleetWindow(fleetId) {
         // Select ship but keep the fleet context so fleet window stays open
         showShipOverFleet = true;
         setSelectedShips([ship.id], { primaryId: ship.id, keepFleet: true });
+        showShipInfoPanel(ship);
       }
     });
     row.addEventListener("dblclick", () => {
@@ -5600,8 +5653,294 @@ function initStarMapDropTarget() {
       normalizeFleets();
       updateFleetPanel();
       refreshFleetWindows();
+      refreshFleetManager();
     }
   });
+}
+
+// ── Fleet Manager Window (independent) ─────────────────────────────
+
+let fleetManagerWindow = null;
+let fmBulkMode = false;
+let fmEditFleetId = null;
+
+function openFleetManagerWindow() {
+  if (fleetManagerWindow) { fleetManagerWindow.style.display = ""; refreshFleetManager(); return; }
+  const win = document.createElement("div");
+  win.id = "fleetManagerWindow";
+  win.className = "fleet-manager-window";
+  win.style.zIndex = "46";
+  win.style.left = "420px";
+  win.style.top = "80px";
+  win.innerHTML = `
+    <div class="fleet-manager-header">
+      <span class="fleet-manager-title">舰队管理</span>
+      <span class="fleet-manager-tools">
+        <button id="fmEditBtn" class="icon-button" type="button" title="编辑">✎</button>
+        <button id="fmBulkEditBtn" class="icon-button" type="button" title="批量编辑">☑</button>
+        <button class="panel-lock" type="button" title="锁定位置">○</button>
+        <button id="fmClose" class="panel-hide" type="button" title="隐藏">×</button>
+      </span>
+    </div>
+    <div id="fmEditPanel" class="fm-edit-panel" style="display:none"></div>
+    <div id="fmBulkEditPanel" class="fm-bulk-edit-panel" style="display:none">
+      <button id="fmBulkFaction" type="button">改势力</button>
+      <button id="fmBulkSpeed" type="button">改速度</button>
+      <button id="fmBulkDelete" type="button">删除舰队</button>
+    </div>
+    <div id="fmFleetList" class="fm-fleet-list"></div>
+    <div id="fmNewFleetDrop" class="fm-new-fleet-drop" data-fleet-drop-new="true">
+      拖放舰船到此处创建新舰队
+    </div>
+  `;
+  document.querySelector("#app").appendChild(win);
+  fleetManagerWindow = win;
+
+  // Close button
+  win.querySelector("#fmClose").addEventListener("click", () => { win.style.display = "none"; });
+
+  // Edit button (single fleet)
+  win.querySelector("#fmEditBtn").addEventListener("click", () => {
+    if (fmEditFleetId) { closeFmEditPanel(); return; }
+    // Use first selected fleet row or selectedFleetId
+    const selRow = win.querySelector(".fleet-row.selected");
+    const fid = selRow?.dataset.fleetId || selectedFleetId;
+    if (!fid) { writeAgentOutput("先选择一个舰队。"); return; }
+    openFmEditPanel(fid);
+  });
+
+  // Bulk edit toggle
+  win.querySelector("#fmBulkEditBtn").addEventListener("click", () => {
+    fmBulkMode = !fmBulkMode;
+    win.querySelector("#fmBulkEditBtn").classList.toggle("active", fmBulkMode);
+    win.querySelector("#fmBulkEditPanel").style.display = fmBulkMode ? "grid" : "none";
+    if (!fmBulkMode) win.querySelectorAll(".fleet-row.fm-selected").forEach((r) => r.classList.remove("fm-selected"));
+    closeFmEditPanel();
+  });
+
+  // Bulk actions
+  win.querySelector("#fmBulkFaction").addEventListener("click", () => {
+    const ids = getSelectedFmFleetIds();
+    if (!ids.length) return writeAgentOutput("先选择舰队。");
+    const faction = prompt("设置势力名称：", "");
+    if (faction === null) return;
+    ids.forEach((fid) => {
+      const fleet = fleets.find((f) => f.id === fid);
+      if (fleet) { fleet.faction = faction.trim(); fleet.shipIds.forEach((sid) => { const s = findShip(sid); if (s) s.faction = faction.trim(); }); }
+    });
+    refreshFleetManager(); updateFleetPanel(); refreshFleetWindows();
+  });
+  win.querySelector("#fmBulkSpeed").addEventListener("click", () => {
+    const ids = getSelectedFmFleetIds();
+    if (!ids.length) return writeAgentOutput("先选择舰队。");
+    const input = prompt("设置速度（如 0.4c / 1ly/sec）：", "");
+    if (input === null) return;
+    const speed = parseShipSpeedSpec(input, null);
+    if (!(speed > 0)) return writeAgentOutput("速度格式无效。");
+    ids.forEach((fid) => {
+      const fleet = fleets.find((f) => f.id === fid);
+      if (fleet) fleet.shipIds.forEach((sid) => { const s = findShip(sid); if (s) s.travelSpeed = speed; });
+    });
+    refreshFleetManager(); updateFleetPanel(); refreshFleetWindows();
+  });
+  win.querySelector("#fmBulkDelete").addEventListener("click", () => {
+    const ids = getSelectedFmFleetIds();
+    if (!ids.length) return writeAgentOutput("先选择舰队。");
+    if (!confirm(`确认删除 ${ids.length} 个舰队？（舰船不会被删除）`)) return;
+    fleets = fleets.filter((f) => !ids.includes(f.id));
+    if (ids.includes(selectedFleetId)) selectedFleetId = null;
+    normalizeFleets(); refreshFleetManager(); updateFleetPanel(); refreshFleetWindows();
+  });
+
+  // New fleet drop zone
+  const dropZone = win.querySelector("#fmNewFleetDrop");
+  dropZone.addEventListener("dragover", (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; dropZone.classList.add("drag-over"); });
+  dropZone.addEventListener("dragleave", () => dropZone.classList.remove("drag-over"));
+  dropZone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    dropZone.classList.remove("drag-over");
+    const shipId = e.dataTransfer.getData("text/ship-id");
+    if (!shipId || !findShip(shipId)) return;
+    const name = prompt("新舰队名称：", `舰队-${nextFleetId}`);
+    if (name === null) return;
+    const fleet = createFleet([shipId], name.trim() || undefined);
+    if (fleet) { refreshFleetManager(); updateFleetPanel(); showFleetInfoPanel(fleet); }
+  });
+
+  // Make draggable
+  makePanelDraggable(win, win.querySelector(".fleet-manager-header"), "starmap-panel-fleet-manager");
+  refreshFleetManager();
+}
+
+function closeFleetManagerWindow() {
+  if (fleetManagerWindow) fleetManagerWindow.style.display = "none";
+}
+
+function getSelectedFmFleetIds() {
+  if (!fleetManagerWindow) return [];
+  return Array.from(fleetManagerWindow.querySelectorAll(".fleet-row.fm-selected")).map((r) => r.dataset.fleetId);
+}
+
+function refreshFleetManager() {
+  if (!fleetManagerWindow || fleetManagerWindow.style.display === "none") return;
+  normalizeFleets();
+  const list = fleetManagerWindow.querySelector("#fmFleetList");
+  if (!list) return;
+  list.innerHTML = fleets.length ? fleets.map((fleet) => {
+    const faction = deriveFleetFaction(fleet);
+    const location = describeFleetLocation(fleet);
+    const selected = selectedFleetId === fleet.id ? " selected" : "";
+    return `<div class="fleet-row${selected}" data-fleet-id="${escapeHtml(fleet.id)}" data-fleet-drop-target="${escapeHtml(fleet.id)}">
+      <span class="fleet-row-icon" data-open-fleet-window="${escapeHtml(fleet.id)}" title="查看舰船列表">▥</span>
+      <span class="fleet-row-name">${escapeHtml(fleet.name)}</span>
+      <span class="fleet-row-faction">${escapeHtml(faction)}</span>
+      <span class="fleet-row-location">${escapeHtml(location)}</span>
+      <span class="fleet-row-count">${fleet.shipIds.length} 艘</span>
+      <button class="fleet-row-camera" data-camera-fleet-id="${escapeHtml(fleet.id)}" type="button" title="定位舰队">⌕</button>
+    </div>`;
+  }).join("") : `<div style="color:var(--muted);font-size:12px;padding:4px 0;">暂无舰队</div>`;
+
+  // Bind fleet row events
+  list.querySelectorAll(".fleet-row").forEach((row) => {
+    row.addEventListener("click", (e) => {
+      if (e.target.closest(".fleet-row-camera") || e.target.closest("[data-open-fleet-window]")) return;
+      if (fmBulkMode) {
+        row.classList.toggle("fm-selected");
+      } else {
+        selectFleet(row.dataset.fleetId);
+        refreshFleetManager();
+      }
+    });
+    row.addEventListener("dblclick", () => {
+      selectFleet(row.dataset.fleetId);
+      const first = selectedShips()[0];
+      if (first) zoomToShip(first, { select: false });
+    });
+
+    // Drop target: add ship to this fleet
+    row.addEventListener("dragover", (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; row.classList.add("drag-over"); });
+    row.addEventListener("dragleave", () => row.classList.remove("drag-over"));
+    row.addEventListener("drop", (e) => {
+      e.preventDefault();
+      row.classList.remove("drag-over");
+      const shipId = e.dataTransfer.getData("text/ship-id");
+      const fromFleetId = e.dataTransfer.getData("text/from-fleet-id");
+      if (!shipId || !findShip(shipId)) return;
+      const targetFleetId = row.dataset.fleetId;
+      const fleet = fleets.find((f) => f.id === targetFleetId);
+      if (!fleet) return;
+      // Remove from old fleet if moving between fleets
+      if (fromFleetId) {
+        const oldFleet = fleets.find((f) => f.id === fromFleetId);
+        if (oldFleet) oldFleet.shipIds = oldFleet.shipIds.filter((id) => id !== shipId);
+      }
+      if (!fleet.shipIds.includes(shipId)) fleet.shipIds.push(shipId);
+      normalizeFleets(); refreshFleetManager(); updateFleetPanel(); refreshFleetWindows();
+    });
+  });
+
+  // Fleet icon → open fleet window
+  list.querySelectorAll("[data-open-fleet-window]").forEach((icon) => {
+    icon.style.cursor = "pointer";
+    icon.addEventListener("click", (e) => { e.stopPropagation(); openFleetShipWindow(icon.dataset.openFleetWindow); });
+  });
+
+  // Camera buttons
+  list.querySelectorAll(".fleet-row-camera").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      selectFleet(btn.dataset.cameraFleetId);
+      const first = selectedShips()[0];
+      if (first) { followShipId = first.id; zoomToShip(first, { select: false }); }
+    });
+  });
+}
+
+// ── Fleet Manager Edit Panel (single fleet) ─────────────────────────
+
+function openFmEditPanel(fleetId) {
+  const fleet = fleets.find((f) => f.id === fleetId);
+  if (!fleet || !fleetManagerWindow) return;
+  fmEditFleetId = fleetId;
+  const panel = fleetManagerWindow.querySelector("#fmEditPanel");
+  panel.style.display = "block";
+  panel.innerHTML = `
+    <div class="fm-edit-fields">
+      <label>舰队名 <input id="fmEditName" type="text" value="${escapeHtml(fleet.name)}" /></label>
+      <label>势力 <input id="fmEditFaction" type="text" value="${escapeHtml(fleet.faction || "")}" /></label>
+      <label>指挥官 <input id="fmEditLeader" type="text" value="${escapeHtml(fleet.leader || "")}" /></label>
+      <label>成立日期 <input id="fmEditFounded" type="text" value="${escapeHtml(fleet.foundedDate || "")}" /></label>
+      <label>历史 <textarea id="fmEditHistory" rows="2">${escapeHtml(fleet.history || "")}</textarea></label>
+    </div>
+    <div class="fm-edit-actions">
+      <button id="fmEditSave" type="button">保存</button>
+      <button id="fmEditCancel" type="button">取消</button>
+      <button id="fmEditSetSpeed" type="button">改速度</button>
+      <button id="fmEditDuplicate" type="button">复制舰船</button>
+      <button id="fmEditSplit" type="button">分拆舰队</button>
+      <button id="fmEditDelete" type="button">删除舰队</button>
+    </div>
+  `;
+  panel.querySelector("#fmEditSave").addEventListener("click", () => {
+    fleet.name = panel.querySelector("#fmEditName").value.trim() || fleet.name;
+    fleet.faction = panel.querySelector("#fmEditFaction").value.trim();
+    fleet.leader = panel.querySelector("#fmEditLeader").value.trim();
+    fleet.foundedDate = panel.querySelector("#fmEditFounded").value.trim();
+    fleet.history = panel.querySelector("#fmEditHistory").value.trim();
+    closeFmEditPanel(); refreshFleetManager(); updateFleetPanel(); refreshFleetWindows();
+    if (selectedFleetId === fleet.id) showFleetInfoPanel(fleet);
+  });
+  panel.querySelector("#fmEditCancel").addEventListener("click", closeFmEditPanel);
+  panel.querySelector("#fmEditSetSpeed").addEventListener("click", () => {
+    const input = prompt("设置舰队全部舰船速度（如 0.4c / 1ly/sec）：", "");
+    if (input === null) return;
+    const speed = parseShipSpeedSpec(input, null);
+    if (!(speed > 0)) return writeAgentOutput("速度格式无效。");
+    fleet.shipIds.forEach((sid) => { const s = findShip(sid); if (s) s.travelSpeed = speed; });
+    writeAgentOutput(`已设置 ${fleet.name} 全部舰船速度。`);
+  });
+  panel.querySelector("#fmEditDuplicate").addEventListener("click", () => {
+    if (!confirm(`复制 ${fleet.name} 的 ${fleet.shipIds.length} 艘舰船？`)) return;
+    const newIds = [];
+    fleet.shipIds.forEach((sid) => {
+      const src = findShip(sid);
+      if (!src) return;
+      const copy = createShip({ ...src, name: src.name + " (副本)", instant: true });
+      if (copy) newIds.push(copy.id);
+    });
+    if (newIds.length) {
+      const newFleet = createFleet(newIds, fleet.name + " (副本)");
+      refreshFleetManager(); updateFleetPanel(); updateShipMeshes();
+      writeAgentOutput(`已复制 ${newIds.length} 艘舰船到新舰队 "${newFleet?.name}"。`);
+    }
+  });
+  panel.querySelector("#fmEditSplit").addEventListener("click", () => {
+    const shipNames = fleet.shipIds.map((id) => findShip(id)).filter(Boolean).map((s) => `${s.name} (${s.id})`);
+    const input = prompt(`选择要分拆的舰船ID（逗号分隔）：\n${shipNames.join("\n")}`, "");
+    if (input === null) return;
+    const splitIds = input.split(",").map((s) => s.trim()).filter((id) => fleet.shipIds.includes(id));
+    if (!splitIds.length) return writeAgentOutput("没有有效的舰船ID。");
+    const newName = prompt("新舰队名称：", `${fleet.name}-分队`);
+    if (newName === null) return;
+    fleet.shipIds = fleet.shipIds.filter((id) => !splitIds.includes(id));
+    const newFleet = createFleet(splitIds, newName.trim());
+    normalizeFleets(); refreshFleetManager(); updateFleetPanel(); refreshFleetWindows();
+    writeAgentOutput(`已分拆 ${splitIds.length} 艘到新舰队 "${newFleet?.name}"。`);
+  });
+  panel.querySelector("#fmEditDelete").addEventListener("click", () => {
+    if (!confirm(`删除舰队 "${fleet.name}"？（舰船不会被删除）`)) return;
+    fleets = fleets.filter((f) => f.id !== fleetId);
+    if (selectedFleetId === fleetId) selectedFleetId = null;
+    closeFmEditPanel(); normalizeFleets(); refreshFleetManager(); updateFleetPanel(); refreshFleetWindows();
+  });
+}
+
+function closeFmEditPanel() {
+  fmEditFleetId = null;
+  if (fleetManagerWindow) {
+    const panel = fleetManagerWindow.querySelector("#fmEditPanel");
+    if (panel) { panel.style.display = "none"; panel.innerHTML = ""; }
+  }
 }
 
 // ── Ship info panel ─────────────────────────────────────────────────
@@ -5660,19 +5999,30 @@ function showFleetInfoPanel(fleet) {
   }
   if (content) {
     const rows = [];
+    const faction = deriveFleetFaction(fleet);
+    const location = describeFleetLocation(fleet);
+    rows.push(`<div class="ship-info-row"><span class="si-key">势力</span><span class="si-val">${escapeHtml(faction)}</span></div>`);
+    rows.push(`<div class="ship-info-row"><span class="si-key">位置</span><span class="si-val">${escapeHtml(location)}</span></div>`);
     rows.push(`<div class="ship-info-row"><span class="si-key">舰船数</span><span class="si-val accent">${fleet.shipIds.length}</span></div>`);
+    if (fleet.leader) rows.push(`<div class="ship-info-row"><span class="si-key">指挥官</span><span class="si-val">${escapeHtml(fleet.leader)}</span></div>`);
+    if (fleet.foundedDate) rows.push(`<div class="ship-info-row"><span class="si-key">成立日期</span><span class="si-val">${escapeHtml(fleet.foundedDate)}</span></div>`);
+    if (fleet.history) rows.push(`<div class="ship-info-row"><span class="si-key">历史</span><span class="si-val" style="white-space:pre-wrap;">${escapeHtml(fleet.history)}</span></div>`);
     rows.push(`<div class="ship-info-row"><span class="si-key">当前命令</span><span class="si-val">${escapeHtml(shipCommandMode === "orbit" ? "右键入轨" : "右键移动")}</span></div>`);
     for (const [classId, groupShips] of grouped) {
       const cls = shipClasses[classId] || { label: classId, icon: "◆" };
       rows.push(`<div class="fleet-section"><div class="fleet-section-title">${escapeHtml(cls.icon)} ${escapeHtml(cls.label)} · ${groupShips.length}</div>`);
-      rows.push(groupShips.map((ship) => `<button class="fleet-ship-link" data-ship-id="${escapeHtml(ship.id)}" type="button"><span>${escapeHtml(cls.icon)}</span><span>${escapeHtml(ship.name)}</span></button>`).join(""));
+      rows.push(groupShips.map((ship) => {
+        const loc = describeShipLocation(ship);
+        const fct = ship.faction || "无所属";
+        return `<button class="fleet-ship-link" data-ship-id="${escapeHtml(ship.id)}" type="button"><span>${escapeHtml(cls.icon)}</span><span>${escapeHtml(ship.name)}</span><span class="fleet-ship-faction">${escapeHtml(fct)}</span><span class="fleet-ship-location">${escapeHtml(loc)}</span></button>`;
+      }).join(""));
       rows.push(`</div>`);
     }
     content.innerHTML = rows.join("");
     content.querySelectorAll(".fleet-ship-link").forEach((btn) => {
       btn.addEventListener("click", () => {
         const ship = findShip(btn.dataset.shipId);
-        if (ship) selectShip(ship);
+        if (ship) { showShipOverFleet = true; showShipInfoPanel(ship); }
       });
     });
   }
@@ -5937,6 +6287,89 @@ async function init() {
     zoomToStar(focus).catch((error) => writeAgentOutput(error.message));
   }
 }
+
+// ── Agent API for fleet management ─────────────────────────────────
+
+window.starMapFleetAPI = {
+  openFleetManager() { openFleetManagerWindow(); return { ok: true }; },
+  closeFleetManager() { closeFleetManagerWindow(); return { ok: true }; },
+  listFleets() { return fleets.map((f) => ({ id: f.id, name: f.name, faction: deriveFleetFaction(f), location: describeFleetLocation(f), ships: f.shipIds.length, leader: f.leader, foundedDate: f.foundedDate })); },
+  fleetInfo(fleetId) {
+    const f = fleets.find((fl) => fl.id === fleetId);
+    if (!f) return { error: "fleet not found" };
+    return { id: f.id, name: f.name, faction: deriveFleetFaction(f), location: describeFleetLocation(f), ships: f.shipIds.length, shipIds: [...f.shipIds], leader: f.leader, foundedDate: f.foundedDate, history: f.history };
+  },
+  editFleet(fleetId, opts = {}) {
+    const f = fleets.find((fl) => fl.id === fleetId);
+    if (!f) return { error: "fleet not found" };
+    if (opts.name !== undefined) f.name = opts.name;
+    if (opts.faction !== undefined) f.faction = opts.faction;
+    if (opts.leader !== undefined) f.leader = opts.leader;
+    if (opts.foundedDate !== undefined) f.foundedDate = opts.foundedDate;
+    if (opts.history !== undefined) f.history = opts.history;
+    refreshFleetManager(); updateFleetPanel(); refreshFleetWindows();
+    return { ok: true, fleet: { id: f.id, name: f.name, faction: f.faction, leader: f.leader, foundedDate: f.foundedDate } };
+  },
+  setFleetFaction(fleetId, faction) {
+    const f = fleets.find((fl) => fl.id === fleetId);
+    if (!f) return { error: "fleet not found" };
+    f.faction = faction;
+    f.shipIds.forEach((sid) => { const s = findShip(sid); if (s) s.faction = faction; });
+    refreshFleetManager(); updateFleetPanel(); refreshFleetWindows();
+    return { ok: true };
+  },
+  setFleetSpeed(fleetId, speedStr) {
+    const f = fleets.find((fl) => fl.id === fleetId);
+    if (!f) return { error: "fleet not found" };
+    const speed = parseShipSpeedSpec(speedStr, null);
+    if (!(speed > 0)) return { error: "invalid speed" };
+    f.shipIds.forEach((sid) => { const s = findShip(sid); if (s) s.travelSpeed = speed; });
+    refreshFleetManager(); updateFleetPanel(); refreshFleetWindows();
+    return { ok: true, speedC: speed };
+  },
+  duplicateFleetShips(fleetId) {
+    const f = fleets.find((fl) => fl.id === fleetId);
+    if (!f) return { error: "fleet not found" };
+    const newIds = [];
+    f.shipIds.forEach((sid) => { const src = findShip(sid); if (!src) return; const copy = createShip({ ...src, name: src.name + " (副本)", instant: true }); if (copy) newIds.push(copy.id); });
+    const newFleet = createFleet(newIds, f.name + " (副本)");
+    updateShipMeshes(); refreshFleetManager(); updateFleetPanel();
+    return { ok: true, newFleetId: newFleet?.id, newShipCount: newIds.length };
+  },
+  splitFleet(fleetId, shipIds, newName) {
+    const f = fleets.find((fl) => fl.id === fleetId);
+    if (!f) return { error: "fleet not found" };
+    const valid = shipIds.filter((id) => f.shipIds.includes(id));
+    if (!valid.length) return { error: "no valid ship ids to split" };
+    f.shipIds = f.shipIds.filter((id) => !valid.includes(id));
+    const newFleet = createFleet(valid, newName || `${f.name}-分队`);
+    normalizeFleets(); refreshFleetManager(); updateFleetPanel(); refreshFleetWindows();
+    return { ok: true, newFleetId: newFleet?.id, removedCount: valid.length };
+  },
+  deleteFleet(fleetId) {
+    const idx = fleets.findIndex((f) => f.id === fleetId);
+    if (idx < 0) return { error: "fleet not found" };
+    fleets.splice(idx, 1);
+    if (selectedFleetId === fleetId) selectedFleetId = null;
+    normalizeFleets(); refreshFleetManager(); updateFleetPanel(); refreshFleetWindows();
+    return { ok: true };
+  },
+  addShipToFleet(shipId, fleetId) {
+    const f = fleets.find((fl) => fl.id === fleetId);
+    if (!f) return { error: "fleet not found" };
+    if (!findShip(shipId)) return { error: "ship not found" };
+    if (!f.shipIds.includes(shipId)) f.shipIds.push(shipId);
+    normalizeFleets(); refreshFleetManager(); updateFleetPanel(); refreshFleetWindows();
+    return { ok: true };
+  },
+  removeShipFromFleet(shipId, fleetId) {
+    const f = fleets.find((fl) => fl.id === fleetId);
+    if (!f) return { error: "fleet not found" };
+    f.shipIds = f.shipIds.filter((id) => id !== shipId);
+    normalizeFleets(); refreshFleetManager(); updateFleetPanel(); refreshFleetWindows();
+    return { ok: true };
+  }
+};
 
 window.addEventListener("resize", resize);
 init().catch((error) => {
