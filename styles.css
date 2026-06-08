@@ -1681,6 +1681,61 @@ button[aria-pressed="true"] {
   font-size: 11px;
 }
 
+/* Orbit-mode toggle row: checkbox aligned with its label + 流速 box */
+.ship-command-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ship-command-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.ship-command-toggle input[type="checkbox"] {
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.orbit-anim-flow {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.orbit-anim-flow input {
+  width: 52px;
+  background: rgba(4, 10, 18, 0.92);
+}
+
+/* Membership shuttle per-column search box */
+.be-col-filter {
+  margin: 4px;
+  padding: 4px 7px;
+  font-size: 11px;
+  background: var(--input-bg, #0a0f16);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  color: var(--text);
+}
+
+.be-col-filter:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 .ship-control-grid button:disabled,
 .command-mode:disabled {
   cursor: not-allowed;

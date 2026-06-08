@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>2350 年人类文明太阳周边 50 光年星图</title>
-    <link rel="stylesheet" href="./styles.css?v=11" />
+    <link rel="stylesheet" href="./styles.css?v=14" />
     <script>
       window.onerror = function(msg, url, line, col, error) {
         console.error('[onerror]', msg, 'at', url + ':' + line + ':' + col, error ? error.stack : '');
@@ -206,6 +206,7 @@
             <p class="kicker">选中恒星系</p>
             <h2 id="detailTitle">太阳 / Sol</h2>
           </div>
+          <button id="detailEnterSystemBtn" class="panel-hide info-edit-btn" type="button" title="进入该恒星系内部结构">⊙</button>
           <button id="detailEditBtn" class="panel-hide info-edit-btn" type="button" title="编辑当前信息">✎</button>
           <button id="toggleRight" class="panel-toggle panel-toggle-right panel-hide" type="button" title="隐藏">×</button>
         </div>
@@ -293,12 +294,15 @@
             <button class="command-mode active" data-command-mode="move" type="button">右键移动</button>
             <button class="command-mode" data-command-mode="orbit" type="button">右键入轨</button>
           </div>
-          <label class="ship-command-toggle"><input id="orbitMouseAdjustToggle" type="checkbox" checked /> 鼠标调整入轨</label>
+          <div class="ship-command-toggle-row">
+            <label class="ship-command-toggle"><input id="orbitMouseAdjustToggle" type="checkbox" checked /><span>鼠标调整入轨参数</span></label>
+            <label class="orbit-anim-flow" id="orbitAnimFlowWrap" title="设置公转速度时的预览动画流速"><span>流速</span><input id="orbitAnimFlowInput" type="number" min="0.1" step="1" value="30" /><span>天/秒</span></label>
+          </div>
           <div class="orbit-command-panel">
             <input id="shipOrbitRadiusInput" type="number" min="0.000001" step="0.00001" value="0.0003" title="轨道半径 ly" />
             <span>ly 半径</span>
-            <input id="shipOrbitSpeedInput" type="number" min="0" step="0.000001" value="0.00001" title="轨道速度 c；0 表示使用周期" />
-            <span>c 速度</span>
+            <input id="shipOrbitSpeedInput" type="number" min="0" step="0.000001" value="0.00001" title="公转速度 c；0 表示使用周期" />
+            <span>公转速度</span>
             <input id="shipOrbitYears" type="number" min="0" step="1" value="0" title="年" /><span>年</span>
             <input id="shipOrbitMonths" type="number" min="0" step="1" value="0" title="月" /><span>月</span>
             <input id="shipOrbitDays" type="number" min="0" step="1" value="180" title="日" /><span>日</span>
@@ -375,6 +379,6 @@
       </div>
     </main>
 
-    <script type="module" src="./app.js?v=23"></script>
+    <script type="module" src="./app.js?v=32"></script>
   </body>
 </html>
