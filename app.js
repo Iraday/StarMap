@@ -1203,65 +1203,18 @@ function showBodyDetails(body, star) {
 
 function openDetailEditor() {
   if (!currentDetailTarget) return;
-  if (detailTabs) detailTabs.innerHTML = "";
   const target = currentDetailTarget;
   if (target.type === "star") {
     const star = target.item || selectedStar;
     if (!star) return;
-    detailTitle.textContent = `编辑: ${star.short || star.name || star.id}`;
-    renderInlineEditor(detailList, [
-      { key: "name", label: "名称", value: star.name },
-      { key: "short", label: "短名", value: star.short },
-      { key: "className", label: "主星类型", value: star.className },
-      { key: "planets", label: "行星统计 Markdown", value: star.planets, multiline: true },
-      { key: "reality", label: "现实口径 Markdown", value: star.reality, multiline: true },
-      { key: "setting", label: "2350设定 Markdown", value: star.setting, multiline: true },
-      { key: "notes", label: "势力备注 Markdown", value: star.notes, multiline: true },
-      { key: "age", label: "恒星年龄", value: star.age },
-      { key: "lifespan", label: "恒星寿命", value: star.lifespan, multiline: true },
-      { key: "disasters", label: "灾害特征", value: star.disasters, multiline: true },
-      { key: "hz_inner", label: "宜居带内缘 AU", value: star.hz_inner, number: true, optional: true },
-      { key: "hz_outer", label: "宜居带外缘 AU", value: star.hz_outer, number: true, optional: true },
-      { key: "rule_info_time", label: "可容忍统治信息传播时间 年", value: star.rule_info_time, number: true },
-      { key: "info_speed", label: "信息传播速度 ly/年", value: star.info_speed, number: true },
-      { key: "ftl_speed", label: "FTL速度倍率", value: star.ftl_speed, number: true },
-    ], async (payload) => {
-      await editStarInfo(star.id, payload);
-      Object.assign(star, payload);
-      showDetails(star);
-    }, () => showDetails(star));
+    openBigEditModal({ type: "star", objects: [star] });
     return;
   }
-
   if (target.type === "body") {
     const body = target.item || selectedBody;
     const star = target.star || selectedStar;
     if (!body || !star) return;
-    detailTitle.textContent = `编辑: ${body.name || body.id}`;
-    renderInlineEditor(detailList, [
-      { key: "name", label: "名称", value: body.name },
-      { key: "bodyType", label: "天体类型", value: body.bodyType },
-      { key: "orbitAu", label: "半长轴/平均轨道 AU", value: body.orbitAu, number: true },
-      { key: "orbitPerihelionAu", label: "近日点 AU", value: body.orbitPerihelionAu, number: true, optional: true },
-      { key: "orbitAphelionAu", label: "远日点 AU", value: body.orbitAphelionAu, number: true, optional: true },
-      { key: "eccentricity", label: "偏心率", value: body.eccentricity, number: true, optional: true },
-      { key: "inclinationDeg", label: "轨道倾角 °", value: body.inclinationDeg, number: true, optional: true },
-      { key: "longitudeAscendingNodeDeg", label: "升交点黄经 °", value: body.longitudeAscendingNodeDeg, number: true, optional: true },
-      { key: "argumentPerihelionDeg", label: "近地点幅角 °", value: body.argumentPerihelionDeg, number: true, optional: true },
-      { key: "orbitalPeriodDays", label: "公转周期 日", value: body.orbitalPeriodDays, number: true, optional: true },
-      { key: "radiusLabel", label: "尺度 Markdown", value: body.radiusLabel },
-      { key: "massLabel", label: "质量 Markdown", value: body.massLabel },
-      { key: "terraformStatus", label: "地球化状态", value: body.terraformStatus },
-      { key: "habitabilityScore", label: "宜居评分", value: body.habitabilityScore, number: true },
-      { key: "summary", label: "说明 Markdown", value: body.summary, multiline: true },
-      { key: "rule_info_time", label: "可容忍统治信息传播时间 年", value: body.rule_info_time, number: true },
-      { key: "info_speed", label: "信息传播速度 ly/年", value: body.info_speed, number: true },
-      { key: "ftl_speed", label: "FTL速度倍率", value: body.ftl_speed, number: true },
-    ], async (payload) => {
-      await editBodyInfo(body.id, payload);
-      Object.assign(body, payload);
-      showBodyDetails(body, star);
-    }, () => showBodyDetails(body, star));
+    openBigEditModal({ type: "body", objects: [body], star });
   }
 }
 
@@ -4309,6 +4262,9 @@ function makePanelDraggable(panel, handle, storageKey) {
   let drag = null;
   handle.addEventListener("pointerdown", (event) => {
     if (locked || event.target.closest("button,input,select,textarea")) return;
+    // Prevent the header text (titles, kickers) from being selected / native-dragged
+    // instead of moving the window.
+    event.preventDefault();
     const rect = panel.getBoundingClientRect();
     panel.style.left = `${rect.left}px`;
     panel.style.top = `${rect.top}px`;
@@ -6233,12 +6189,12 @@ let membershipIncluded = new Set(); // ship ids currently composed into the flee
 let membershipDissolve = new Set();  // fleet ids that will be dissolved (merged in) on save
 let membershipFilter = { included: "", available: "" }; // per-column search text
 
-function openBigEditModal({ type, objects, mode = "edit", seedShipIds = null }) {
+function openBigEditModal({ type, objects, mode = "edit", seedShipIds = null, star = null }) {
   objects = objects || [];
   if (mode !== "new" && !objects.length) return;
   closeBigEditModal(false); // clear any prior
   const bulk = objects.length > 1;
-  bigEditContext = { type, objects, mode, bulk };
+  bigEditContext = { type, objects, mode, bulk, star };
 
   // Initialise membership composer (fleet new / single edit)
   membershipIncluded = new Set();
@@ -6262,7 +6218,8 @@ function openBigEditModal({ type, objects, mode = "edit", seedShipIds = null }) 
   const overlay = document.createElement("div");
   overlay.id = "bigEditOverlay";
   overlay.className = "big-edit-overlay";
-  const kind = type === "fleet" ? "舰队" : "舰船";
+  const kindMap = { fleet: "舰队", ship: "舰船", star: "恒星系", body: "天体" };
+  const kind = kindMap[type] || "对象";
   const title = mode === "new"
     ? "创建新舰队"
     : (bulk ? `批量编辑 ${objects.length} 个${kind}` : `编辑${kind}：${escapeHtml(objects[0].name)}`);
@@ -6315,10 +6272,104 @@ function closeBigEditModal(restore = true) {
   bigEditContext = null;
 }
 
+// Generic labeled field for the big-edit modal (star / body info).
+function beEditField(def) {
+  const v = def.value ?? "";
+  const ph = def.placeholder ? ` placeholder="${escapeHtml(def.placeholder)}"` : "";
+  const hint = def.hint ? `<small class="be-field-hint">${escapeHtml(def.hint)}</small>` : "";
+  if (def.type === "textarea") {
+    return `<label class="be-field be-field-wide"><span>${escapeHtml(def.label)}</span>${hint}<textarea class="be-md" data-edit="${def.key}" data-edit-type="text" rows="${def.rows || 5}"${ph}>${escapeHtml(String(v))}</textarea></label>`;
+  }
+  if (def.type === "checkbox") {
+    return `<label class="be-field be-comm-check"><input type="checkbox" data-edit="${def.key}" data-edit-type="checkbox" ${v ? "checked" : ""} /> <span>${escapeHtml(def.label)}</span></label>`;
+  }
+  const inputType = def.type === "number" ? "number" : "text";
+  const step = def.type === "number" ? ` step="${def.step || "any"}"` : "";
+  return `<label class="be-field"><span>${escapeHtml(def.label)}</span><input type="${inputType}"${step} data-edit="${def.key}" data-edit-type="${def.type === "number" ? "number" : "text"}" value="${escapeHtml(String(v))}"${ph} />${hint}</label>`;
+}
+
 function buildBigEditSections(type, objects, bulk, mode) {
   const factions = collectAllFactions();
   const sections = [];
   const isNew = mode === "new";
+
+  // ── Star system info editor (big modal, sectioned) ──
+  if (type === "star") {
+    const star = objects[0];
+    const fieldGrid = (defs) => `<div class="be-edit-grid">${defs.map(beEditField).join("")}</div>`;
+    sections.push(section("基本信息", fieldGrid([
+      { key: "name", label: "名称 (Markdown)", value: star.name },
+      { key: "short", label: "短名", value: star.short },
+      { key: "rank", label: "实力序", value: star.rank },
+      { key: "octant", label: "八象限", value: star.octant },
+    ])));
+    sections.push(section("势力", `
+      <div class="be-faction">
+        <input class="be-faction-input" data-edit="faction" type="text" value="${escapeHtml(star.faction || "")}" placeholder="输入或从下方选择" />
+        <div class="be-faction-list">
+          ${factions.map((f) => `<button type="button" class="be-faction-opt" data-faction="${escapeHtml(f)}"><span class="be-faction-swatch" style="background:${factionColors[f] || "#8ca6c8"}"></span>${escapeHtml(f)}</button>`).join("")}
+        </div>
+      </div>
+      ${fieldGrid([{ key: "factionType", label: "势力类型", value: star.factionType }])}
+    `));
+    sections.push(section("天文", fieldGrid([
+      { key: "className", label: "主星类型 (Markdown)", value: star.className },
+      { key: "objectType", label: "天体类型", value: star.objectType },
+      { key: "spectralClass", label: "光谱类型", value: star.spectralClass },
+      { key: "starCount", label: "恒星数", value: star.starCount, type: "number", step: "1" },
+      { key: "distance", label: "到太阳系距离 ly", value: star.distance, type: "number", step: "0.01" },
+      { key: "age", label: "恒星年龄", value: star.age },
+      { key: "hz_inner", label: "宜居带内缘 AU", value: star.hz_inner, type: "number" },
+      { key: "hz_outer", label: "宜居带外缘 AU", value: star.hz_outer, type: "number" },
+    ])));
+    sections.push(section("描述 (Markdown)", [
+      beEditField({ key: "planets", label: "行星统计", value: star.planets, type: "textarea", rows: 3 }),
+      beEditField({ key: "lifespan", label: "恒星寿命", value: star.lifespan, type: "textarea", rows: 2 }),
+      beEditField({ key: "disasters", label: "灾害特征", value: star.disasters, type: "textarea", rows: 2 }),
+      beEditField({ key: "reality", label: "现实口径", value: star.reality, type: "textarea", rows: 3 }),
+      beEditField({ key: "setting", label: "2350设定", value: star.setting, type: "textarea", rows: 4 }),
+      beEditField({ key: "notes", label: "势力备注", value: star.notes, type: "textarea", rows: 3 }),
+    ].join("")));
+    sections.push(section("信号传播", fieldGrid([
+      { key: "rule_info_time", label: "可容忍统治信息传播时间 年", value: star.rule_info_time, type: "number" },
+      { key: "info_speed", label: "信息传播速度 ly/年", value: star.info_speed, type: "number" },
+      { key: "ftl_speed", label: "FTL速度倍率", value: star.ftl_speed, type: "number" },
+    ]), "用于战报/统治信息传播时延的推演。"));
+    return sections.join("");
+  }
+
+  // ── Body (planet / moon / comet) info editor ──
+  if (type === "body") {
+    const body = objects[0];
+    const fieldGrid = (defs) => `<div class="be-edit-grid">${defs.map(beEditField).join("")}</div>`;
+    sections.push(section("基本信息", fieldGrid([
+      { key: "name", label: "名称 (Markdown)", value: body.name },
+      { key: "bodyType", label: "天体类型", value: body.bodyType },
+      { key: "habitabilityScore", label: "宜居评分", value: body.habitabilityScore, type: "number" },
+      { key: "terraformStatus", label: "地球化状态", value: body.terraformStatus ?? body.terraform_status },
+    ])));
+    sections.push(section("轨道", fieldGrid([
+      { key: "orbitAu", label: "半长轴/平均轨道 AU", value: body.orbitAu, type: "number" },
+      { key: "orbitPerihelionAu", label: "近日点 AU", value: body.orbitPerihelionAu, type: "number" },
+      { key: "orbitAphelionAu", label: "远日点 AU", value: body.orbitAphelionAu, type: "number" },
+      { key: "eccentricity", label: "偏心率", value: body.eccentricity, type: "number" },
+      { key: "inclinationDeg", label: "轨道倾角 °", value: body.inclinationDeg, type: "number" },
+      { key: "longitudeAscendingNodeDeg", label: "升交点黄经 °", value: body.longitudeAscendingNodeDeg, type: "number" },
+      { key: "argumentPerihelionDeg", label: "近地点幅角 °", value: body.argumentPerihelionDeg, type: "number" },
+      { key: "orbitalPeriodDays", label: "公转周期 日", value: body.orbitalPeriodDays, type: "number" },
+    ])));
+    sections.push(section("物理", fieldGrid([
+      { key: "radiusLabel", label: "尺度 (Markdown)", value: body.radiusLabel },
+      { key: "massLabel", label: "质量 (Markdown)", value: body.massLabel },
+    ])));
+    sections.push(section("说明 (Markdown)", beEditField({ key: "summary", label: "说明", value: body.summary, type: "textarea", rows: 5 })));
+    sections.push(section("信号传播", fieldGrid([
+      { key: "rule_info_time", label: "可容忍统治信息传播时间 年", value: body.rule_info_time, type: "number" },
+      { key: "info_speed", label: "信息传播速度 ly/年", value: body.info_speed, type: "number" },
+      { key: "ftl_speed", label: "FTL速度倍率", value: body.ftl_speed, type: "number" },
+    ])));
+    return sections.join("");
+  }
 
   const factionVal = (!bulk && !isNew)
     ? (type === "fleet" ? (objects[0].faction || deriveFleetFaction(objects[0])) : (objects[0].faction || ""))
@@ -6676,6 +6727,36 @@ function saveBigEdit() {
   const bulk = objects.length > 1;
   const isNew = mode === "new";
   const get = (key) => overlay.querySelector(`[data-edit="${key}"]`);
+
+  // ── Star / body info save (generic field collection) ──
+  if (type === "star" || type === "body") {
+    const payload = {};
+    overlay.querySelectorAll("[data-edit]").forEach((el) => {
+      const key = el.dataset.edit;
+      const t = el.dataset.editType || (el.type === "checkbox" ? "checkbox" : "text");
+      if (t === "checkbox") payload[key] = el.checked;
+      else if (t === "number") { const raw = String(el.value).trim(); if (raw !== "") payload[key] = Number(raw); }
+      else payload[key] = el.value;
+    });
+    if (type === "star") {
+      const star = objects[0];
+      Object.assign(star, payload);
+      editStarInfo(star.id, payload).catch((e) => console.warn("editStarInfo failed", e));
+      if (typeof refreshStarDatalist === "function") refreshStarDatalist();
+      updateVisibility();
+      showDetails(star);
+    } else {
+      const body = objects[0];
+      const star = bigEditContext.star || selectedStar;
+      Object.assign(body, payload);
+      for (const mesh of bodyMeshes) { if (mesh.userData.body?.id === body.id) Object.assign(mesh.userData.body, payload); }
+      editBodyInfo(body.id, payload).catch((e) => console.warn("editBodyInfo failed", e));
+      if (star) showBodyDetails(body, star);
+    }
+    setBigEditStatus("已保存");
+    closeBigEditModal(true);
+    return;
+  }
   const faction = get("faction") ? get("faction").value.trim() : null;
   const speedRaw = get("speed") ? get("speed").value.trim() : "";
   let speed = null;

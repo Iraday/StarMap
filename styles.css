@@ -1356,16 +1356,12 @@ button[aria-pressed="true"] {
   border-color: rgba(114, 214, 201, 0.55);
 }
 
-/* Left panel: lock sits in the top-right corner, just left of the × hide button */
+/* Left panel: lock sits in the top-right corner, same row as and just left of the × hide button */
 .panel-left > .panel-lock {
   position: absolute;
   top: 8px;
-  right: 38px;
+  right: 36px;
   z-index: 2;
-  min-height: 26px;
-  height: 26px;
-  min-width: 26px;
-  width: 26px;
 }
 
 .panel-left.collapsed > .panel-lock {
@@ -1853,18 +1849,24 @@ button[aria-pressed="true"] {
   }
 }
 
-/* ── Standardize all top-right panel icons (lock/hide) ── */
+/* ── Standardize ALL top-right panel header buttons (lock / edit / enter-system / hide).
+   RULE: every UI window header action button (except the time-control HUD) is the same
+   square size, sits in the top-right corner on one row, top & bottom aligned. ── */
 .panel-hide,
 .panel-lock,
+.panel-toggle,
+.fleet-panel-toggle,
 .info-edit-btn,
 .ship-info-close,
-.ship-info-minimize {
+.ship-info-minimize,
+.icon-button {
   display: grid;
   place-items: center;
-  min-width: 22px;
-  width: 22px;
-  height: 22px;
-  min-height: 22px;
+  min-width: 24px;
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  box-sizing: border-box;
   border: 1px solid var(--panel-border);
   border-radius: 4px;
   background: rgba(237, 243, 248, 0.08);
@@ -1874,6 +1876,26 @@ button[aria-pressed="true"] {
   line-height: 1;
   padding: 0;
   flex-shrink: 0;
+}
+
+/* Panel header rows: keep all action buttons on one row, aligned top & bottom */
+.detail-head {
+  align-items: center;
+}
+
+/* Drag handles must not let their text get selected / dragged instead of the window */
+.mast,
+.detail-head,
+.detail-head-text,
+.fleet-panel-header,
+.ship-command-header,
+.ship-info-header,
+.tiny-panel-header,
+.ui-manager-header,
+.fleet-manager-header,
+.time-hud-inner {
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* ── Fleet-specific ship window ── */
@@ -2267,10 +2289,35 @@ button[aria-pressed="true"] {
 }
 
 .be-field input:focus,
+.be-field textarea:focus,
 .be-md:focus,
 .be-faction-input:focus {
   outline: none;
   border-color: var(--accent);
+}
+
+/* Two-column grid of compact fields for star / body info editing */
+.be-edit-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+}
+
+.be-field-wide,
+.be-edit-grid > .be-field-wide {
+  grid-column: 1 / -1;
+}
+
+.be-field-hint {
+  color: var(--muted);
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+@media (max-width: 640px) {
+  .be-edit-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Faction searchable selector */
