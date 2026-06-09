@@ -2959,13 +2959,15 @@ function setupInteraction() {
   // (so clicking a NAME LABEL or near an object also works). Returns true if filled.
   function fillPickTarget(inputEl, event) {
     if (!inputEl) return false;
-    const bodyHits = raycaster.intersectObjects(bodyMeshes.filter((m) => m.visible), false);
+    // ── Priority 1: solid objects (body spheres, stars, ships) — never orbit rings ──
+    const bodySpheres = bodyMeshes.filter((m) => m.visible && !m.userData?.isBodyOrbit);
+    const bodyHits = raycaster.intersectObjects(bodySpheres, false);
     if (bodyHits.length) { const b = bodyHits[0].object.userData.body; if (b) { inputEl.value = b.name || b.id; return true; } }
     const starHits = raycaster.intersectObjects(starMeshes.filter((m) => m.visible), false);
     if (starHits.length) { const s = starHits[0].object.userData.star; if (s) { inputEl.value = s.name || s.short || s.id; return true; } }
     const shipHits = raycaster.intersectObjects(getShipMeshTargets(), false);
     if (shipHits.length) { const sh = shipHits[0].object.userData.ship; if (sh) { inputEl.value = sh.name || sh.id; return true; } }
-    // Screen-space nearest fallback (covers clicking on labels / just beside an object)
+    // ── Priority 2: screen-space nearest label/object (covers clicking on a name label) ──
     const rect = canvas.getBoundingClientRect();
     const px = event.clientX, py = event.clientY;
     let bestName = null, bestD = Infinity;
@@ -2979,9 +2981,12 @@ function setupInteraction() {
       if (d < bestD) { bestD = d; bestName = name; }
     };
     for (const m of starMeshes) if (m.visible) { const s = m.userData.star; consider(m, s && (s.name || s.short || s.id)); }
-    for (const m of bodyMeshes) if (m.visible) { const b = m.userData.body; consider(m, b && (b.name || b.id)); }
+    for (const m of bodySpheres) { const b = m.userData.body; consider(m, b && (b.name || b.id)); }
     for (const [, entry] of shipMeshes) if (entry.mesh?.visible) { const sh = entry.mesh.userData.ship; consider(entry.mesh, sh && (sh.name || sh.id)); }
     if (bestName && bestD <= 64) { inputEl.value = bestName; return true; }
+    // ── Priority 3: orbit rings, only as a last resort (no solid object or label nearby) ──
+    const ringHits = raycaster.intersectObjects(bodyMeshes.filter((m) => m.visible && m.userData?.isBodyOrbit), false);
+    if (ringHits.length) { const b = ringHits[0].object.userData.body; if (b) { inputEl.value = b.name || b.id; return true; } }
     return false;
   }
 
@@ -3020,7 +3025,9 @@ function setupInteraction() {
         return;
       }
     }
-    const bodyHits = raycaster.intersectObjects(bodyMeshes.filter((mesh) => mesh.visible), false);
+    // Prefer solid body spheres over orbit rings (rings overlap in screen space)
+    let bodyHits = raycaster.intersectObjects(bodyMeshes.filter((mesh) => mesh.visible && !mesh.userData?.isBodyOrbit), false);
+    if (!bodyHits.length) bodyHits = raycaster.intersectObjects(bodyMeshes.filter((mesh) => mesh.visible && mesh.userData?.isBodyOrbit), false);
     if (bodyHits.length) {
       const body = bodyHits[0].object.userData.body;
       const star = bodyHits[0].object.userData.star;
@@ -4284,7 +4291,8 @@ function makePanelDraggable(panel, handle, storageKey) {
   lockBtn.className = `panel-lock${locked ? " locked" : ""}`;
   lockBtn.title = locked ? "解锁拖拽" : "锁定位置";
   lockBtn.textContent = locked ? "●" : "○";
-  const hideButton = handle.querySelector(".panel-hide, .ship-info-close, .panel-toggle, .fleet-panel-toggle, .time-hud-toggle");
+  const hideButton = handle.querySelector(".panel-hide, .ship-info-close, .panel-toggle, .fleet-panel-toggle, .time-hud-toggle")
+    || panel.querySelector(":scope > .panel-toggle, :scope > .panel-hide");
   if (hideButton) hideButton.parentNode.insertBefore(lockBtn, hideButton);
   else handle.appendChild(lockBtn);
   lockBtn.addEventListener("click", (event) => {

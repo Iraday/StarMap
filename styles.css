@@ -1356,6 +1356,22 @@ button[aria-pressed="true"] {
   border-color: rgba(114, 214, 201, 0.55);
 }
 
+/* Left panel: lock sits in the top-right corner, just left of the × hide button */
+.panel-left > .panel-lock {
+  position: absolute;
+  top: 8px;
+  right: 38px;
+  z-index: 2;
+  min-height: 26px;
+  height: 26px;
+  min-width: 26px;
+  width: 26px;
+}
+
+.panel-left.collapsed > .panel-lock {
+  display: none;
+}
+
 .fleet-panel-header {
   display: flex;
   align-items: center;
